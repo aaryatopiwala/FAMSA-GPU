@@ -19,6 +19,11 @@ void DistanceCalculator<_distance>::run(std::vector<CSequence*>& sequences, tree
 		ofs << endl;
 	}
 
+	// if (enable_cuda) {
+	// 	LOG_NORMAL << "cuda flag on" << std::endl;
+	// 	return;
+	// }
+
 	//
 	int n_seqs = (int)sequences.size();
 	CSingleLinkageQueue<float> queue(&sequences, (uint32_t) sequences.size(), n_threads * 8);

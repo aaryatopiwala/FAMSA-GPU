@@ -200,6 +200,11 @@ bool CParams::parse(int argc, char** argv, bool& showExpert)
 		gt_heuristic = GT::ClusterTree;
 	}
 
+	if (findSwitch(params, "-cuda")) {
+		enable_cuda = true;
+		LOG_NORMAL << "CUDA enabled\n";
+	}
+
 	findOption(params, "-medoid_threshold", medoid.threshold);
 	findOption(params, "-subtree_size", medoid.subtree_size);
 	findOption(params, "-sample_size", medoid.sample_size);

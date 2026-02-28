@@ -119,13 +119,13 @@ std::shared_ptr<AbstractTreeGenerator> CFAMSA::createTreeGenerator(const CParams
 		if (params.distance == Distance::indel_div_lcs) {
 			gen = make_shared<DistanceCalculator<Distance::indel_div_lcs>>(
 				params.n_threads, params.instruction_set, 
-				params.output_file_name, params.generate_square_matrix, params.calculate_pid);
+				params.output_file_name, params.generate_square_matrix, params.calculate_pid, params.enable_cuda);
 
 		}
 		else if (params.distance == Distance::indel075_div_lcs) {
 			gen = make_shared<DistanceCalculator<Distance::indel075_div_lcs>>(
 				params.n_threads, params.instruction_set, 
-				params.output_file_name, params.generate_square_matrix, params.calculate_pid);
+				params.output_file_name, params.generate_square_matrix, params.calculate_pid, params.enable_cuda);
 		}
 	
 		return gen;

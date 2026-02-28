@@ -72,6 +72,7 @@ public:
 	bool enable_gap_rescaling				= true;
 	bool enable_gap_optimization			= true;
 	bool enable_total_score_calculation		= true;
+	bool enable_cuda						= false; // GPU LCS
 	
 	Refinement::Mode refinement_mode		= Refinement::AUTO;
 	uint32_t n_refinements					= 100;

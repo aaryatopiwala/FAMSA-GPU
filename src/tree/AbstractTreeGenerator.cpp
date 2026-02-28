@@ -15,6 +15,16 @@ Authors: Sebastian Deorowicz, Agnieszka Debudaj-Grabysz, Adam Gudys
 
 using namespace std;
 
+bool AbstractTreeGenerator::enable_cuda = false;
+
+void AbstractTreeGenerator::setCuda(bool flag) {
+	enable_cuda = flag;
+}
+
+bool AbstractTreeGenerator::isCudaEnabled() {
+	return enable_cuda;
+}
+
 // *******************************************************************
 AbstractTreeGenerator::AbstractTreeGenerator(int n_threads, instruction_set_t instruction_set) 
 	: n_threads(n_threads), instruction_set(instruction_set) {

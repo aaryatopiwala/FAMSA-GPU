@@ -19,6 +19,7 @@ Authors: Sebastian Deorowicz, Agnieszka Debudaj-Grabysz, Adam Gudys
 #include "./utils/log.h"
 
 #include "./core/version.h"
+#include "./tree/AbstractTreeGenerator.h"
 
 #define VAL(str) #str
 #define TOSTRING(str) VAL(str)
@@ -52,6 +53,7 @@ int main(int argc, char *argv[])
 			def_params.show_usage(showExpert);
 			return 0;
 		}
+		AbstractTreeGenerator::setCuda(params.enable_cuda);
 
 		CStopWatch timer, timer_saving;
 

@@ -24,7 +24,8 @@ public:
 	AbstractTreeGenerator(int n_threads, instruction_set_t instruction_set);
 
 	virtual ~AbstractTreeGenerator() {}
-	
+	static void setCuda(bool flag);
+	static bool isCudaEnabled();
 	void operator()(std::vector<CSequence*>& sequences, tree_structure& tree);
 		
 	template <class seq_type, class distance_type, typename Transform>
@@ -74,7 +75,8 @@ public:
 protected:
 	int n_threads;
 	instruction_set_t instruction_set;
-	
+	static bool enable_cuda;
+
 	virtual void run(std::vector<CSequence*>& sequences, tree_structure& tree) = 0;
 
 #ifdef DEVELOPER_MODE

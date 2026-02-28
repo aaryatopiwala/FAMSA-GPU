@@ -140,6 +140,11 @@ void AbstractTreeGenerator::calculateDistanceVector(
 	
 	seq_to_ptr(ref)->ComputeBitMasks();
 
+	if (AbstractTreeGenerator::isCudaEnabled()) {
+		std::cout << "cuda flag on" << std::endl;
+		return;
+	}
+
 	// process portions of 8 sequences
 	for (int j = 0; j < n_seqs / 8; ++j) {
 		lcsbp.GetLCSBP(
