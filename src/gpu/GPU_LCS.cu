@@ -39,7 +39,7 @@ __global__ void LCS_Kernel(
 
             for (int j = 0; j < seq_len; ++j) {
                 unsigned char c = seq[j];
-                if (c >= NO_SYMBOLS) {
+                if ( c == 22 || c >= 32) { // unknown symbol, or over symbol range, skip
                     continue;
                 }
                 const uint64_t* s0b = d_ref_bitmasks + c * bv_len; // bitmask for symbol c
@@ -170,19 +170,22 @@ void GpuLCS::computeLCSLengths(
 
         // apply transform
 
-        // for (int i = 0; i < batch_n; ++i) {
-        //     out_vector[start + i] = transform(h_out_lcs[i], ref_len, h_lengths[i]);
-        // }
+        for (int i = 0; i < batch_n; ++i) {
+            out_vector[start + i] = h_out_lcs[i]; // transform happens outside
+        }
 
         // 5. free gpu mem
         cudaFree(d_concat_seqs);
         cudaFree(d_ref);
-        cudaFree(d_ref_bitmasks);
+        
         cudaFree(d_offsets);
         cudaFree(d_lengths);
         cudaFree(d_out_lcs);
     
     }
+
+    cudaFree(d_ref_bitmasks);
+    cudaFree(d_workspace);
 
 
 }
