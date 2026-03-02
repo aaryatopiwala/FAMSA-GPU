@@ -8,6 +8,8 @@
 #include <fstream>
 #include <string>
 #include <iostream>
+#include "../core/sequence.h"
+#include <cuda_runtime.h>
 
 
 __global__ void LCS_Kernel(
