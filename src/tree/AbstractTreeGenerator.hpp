@@ -143,7 +143,7 @@ void AbstractTreeGenerator::calculateDistanceVector(
 
 	GpuLCS gpuLCS;
 	if (AbstractTreeGenerator::isCudaEnabled()) {
-		std::cout << "cuda flag on" << std::endl;
+		// std::cout << "cuda flag on" << std::endl;
 		// gpu function here
 		gpuLCS.GPUcalculateDistanceVector(
 			transform,
