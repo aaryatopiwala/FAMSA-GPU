@@ -62,7 +62,7 @@ __global__ void LCS_Kernel(
     }
 }
 
-void computeLCSLengths(
+void GpuLCS::computeLCSLengths(
 		CSequence* ref,
 		CSequence** sequences,
 		int n_seqs,
