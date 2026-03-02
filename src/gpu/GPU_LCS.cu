@@ -9,7 +9,6 @@
 #include <string>
 #include <iostream>
 
-const int BATCH_SIZE = 5000;
 
 __global__ void LCS_Kernel(
     const symbol_t* d_concat_seqs,
@@ -73,6 +72,7 @@ void GPUcalculateDistanceVector(
 {
 
     // 1. bitmasks are already in ref
+    const int BATCH_SIZE = 5000;
     auto pref = seq_to_ptr(ref);
     int ref_len = pref->length;
     int bv_len = (ref_len + 63) / 64; // number of 64-bit words needed for bitmask
