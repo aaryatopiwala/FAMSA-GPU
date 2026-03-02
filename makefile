@@ -115,7 +115,7 @@ $(OUT_BIN_DIR)/famsa: mimalloc_obj \
 	$(NVCC) -o $@  \
 	$(MIMALLOC_OBJ) \
 	$(OBJ_MAIN) $(OBJ_CORE) $(OBJ_LCS) $(OBJ_TREE) $(OBJ_UTILS) $(OBJ_SIMD) $(GPU_OBJS) \
-	$(LIBRARY_FILES) $(LINKER_FLAGS) $(LINKER_DIRS) $(CUDA_LIBS)
+	$(LIBRARY_FILES) $(filter-out -fabi-version=6,$(LINKER_FLAGS)) $(LINKER_DIRS) $(CUDA_LIBS)
 
 # *** Cleaning
 .PHONY: clean init
