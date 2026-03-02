@@ -4,6 +4,10 @@
 #include <stdint.h>
 #include <algorithm>
 #include <stdio.h>
+#include <cstring>
+#include <fstream>
+#include <string>
+#include <iostream>
 
 const int BATCH_SIZE = 5000;
 
@@ -84,14 +88,14 @@ void GPUcalculateDistanceVector(
     cudaError_t err = cudaMalloc(&d_ref_bitmasks, h_ref_bitmasks.size() * sizeof(uint64_t));    
     err = cudaMemcpy(d_ref_bitmasks, h_ref_bitmasks.data(), h_ref_bitmasks.size() * sizeof(uint64_t), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) {
-        std::cerr << "CUDA memcpy failed for bitmasks: " << cudaGetErrorString(err) << std::endl;
+        fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
         return;
     }
 
     uint64_t* d_workspace;
     err = cudaMalloc(&d_workspace, bv_len * sizeof(uint64_t)); // workspace for bit parallel computation
     if (err != cudaSuccess) {
-        std::cerr << "CUDA malloc failed for workspace: " << cudaGetErrorString(err) << std::endl;
+        fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
         return;
     }
 
@@ -128,7 +132,7 @@ void GPUcalculateDistanceVector(
         err = cudaMalloc(&d_lengths, batch_n * sizeof(int));
         err = cudaMalloc(&d_out_lcs, batch_n * sizeof(uint32_t));
         if (err != cudaSuccess) {
-            std::cerr << "CUDA malloc failed: " << cudaGetErrorString(err) << std::endl;
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         
@@ -138,7 +142,7 @@ void GPUcalculateDistanceVector(
         err = cudaMemcpy(d_offsets, h_offsets.data(), batch_n * sizeof(int), cudaMemcpyHostToDevice);
         err = cudaMemcpy(d_lengths, h_lengths.data(), batch_n * sizeof(int), cudaMemcpyHostToDevice);
         if (err != cudaSuccess) {
-            std::cerr << "CUDA memcpy failed: " << cudaGetErrorString(err) << std::endl;
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)) ;
             return;
         }
 
@@ -150,7 +154,7 @@ void GPUcalculateDistanceVector(
         // error check
         err = cudaGetLastError();
         if (err != cudaSuccess) {
-            std::cerr << "CUDA kernel launch failed: " << cudaGetErrorString(err) << std::endl;
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
 
@@ -161,7 +165,7 @@ void GPUcalculateDistanceVector(
         std::vector<uint32_t> h_out_lcs(batch_n);
         err = cudaMemcpy(h_out_lcs.data(), d_out_lcs, batch_n * sizeof(uint32_t), cudaMemcpyDeviceToHost);
         if (err != cudaSuccess) {
-            std::cerr << "CUDA memcpy back failed: " << cudaGetErrorString(err) << std::endl;
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
 
