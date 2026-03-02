@@ -74,7 +74,7 @@ void GpuLCS::computeLCSLengths(
     const int BATCH_SIZE = 5000;
     auto pref = ref;
     int ref_len = pref->length;
-    int bv_len = (ref_len + 63) / 64; // number of 64-bit words needed for bitmask
+    int bv_len = (pref->data_size + 63) / 64; // number of 64-bit words needed for bitmask
     const symbol_t* ref_ptr = pref->data;
 
     std::vector<uint64_t> h_ref_bitmasks((size_t)(NO_SYMBOLS) * bv_len);
