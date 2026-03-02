@@ -70,7 +70,7 @@ void computeLCSLengths(
 
     // 1. bitmasks are already in ref
     const int BATCH_SIZE = 5000;
-    auto pref = seq_to_ptr(ref);
+    auto pref = ref;
     int ref_len = pref->length;
     int bv_len = (ref_len + 63) / 64; // number of 64-bit words needed for bitmask
     const symbol_t* ref_ptr = pref->data;
@@ -108,7 +108,7 @@ void computeLCSLengths(
         std::vector<int> h_lengths(batch_n);
         int running_offset = 0;
         for (int i = 0; i < batch_n; ++i) {
-            auto pseq = seq_to_ptr(sequences[start + i]);
+            auto pseq = sequences[start + i];
             int len = pseq->length;
             h_lengths[i] = len;
             h_offsets[i] = running_offset;
