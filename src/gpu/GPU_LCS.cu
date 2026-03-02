@@ -1,7 +1,7 @@
 
 #include "GPU_LCS.cuh"
 #include <vector>
-#include <cstdint.h>
+#include <stdint.h>
 #include <algorithm>
 #include <stdio.h>
 
