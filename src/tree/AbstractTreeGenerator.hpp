@@ -16,6 +16,7 @@ Authors: Sebastian Deorowicz, Agnieszka Debudaj-Grabysz, Adam Gudys
 #include <cmath>
 #include <type_traits>
 #include <algorithm>
+#include "../gpu/GPU_LCS.cuh"
 
 // overloads for converting sequence type to pointer
 inline CSequence* seq_to_ptr(CSequence* x) { return x; }
@@ -140,10 +141,19 @@ void AbstractTreeGenerator::calculateDistanceVector(
 	
 	seq_to_ptr(ref)->ComputeBitMasks();
 
+	GpuLCS gpuLCS;
 	if (AbstractTreeGenerator::isCudaEnabled()) {
 		std::cout << "cuda flag on" << std::endl;
+		// gpu function here
+		gpuLCS.GPUcalculateDistanceVector(
+			transform,
+			ref,
+			sequences,
+			n_seqs,
+			out_vector,
+			lcsbp);
 		return;
-	}
+	} else {
 
 	// process portions of 8 sequences
 	for (int j = 0; j < n_seqs / 8; ++j) {
@@ -182,7 +192,7 @@ void AbstractTreeGenerator::calculateDistanceVector(
 		for (int k = 0; k < 8 && n_processed + k < n_seqs; ++k)
 			out_vector[n_processed + k] = transform(lcs_lens[k], seq_to_ptr(ref)->length, seq_to_ptr(sequences[n_processed + k])->length);
 	}
-
+ }
 	seq_to_ptr(ref)->ReleaseBitMasks();
 }
 

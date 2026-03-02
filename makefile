@@ -77,15 +77,45 @@ OBJ_SIMD := $(patsubst $(SRC_SIMD_DIR)/%.cpp, $(OBJ_SIMD_DIR)/%.cpp.o, $(SRC_SIM
 # Dependency files (needed only for SIMD)
 -include $(OBJ_SIMD:.o=.o.d)
 
-# *** Targets
+# stuff for cuda
+CUDA_HOME ?= /usr/local/cuda
+NVCC := $(shell command -v nvcc 2>/dev/null)
+
+# set nvcc path and CUDA_HOME based on env vars
+ifeq ($(NVCC),)
+  ifdef CUDA_HOME
+    NVCC := $(CUDA_HOME)/bin/nvcc
+  else
+    CUDA_HOME ?= /usr/local/cuda
+    NVCC := $(CUDA_HOME)/bin/nvcc
+  endif
+else
+  # get cuda from nvcc path
+  CUDA_HOME := $(patsubst %/bin/nvcc,%,$(NVCC))
+endif
+
+CUDA_INC := -I$(CUDA_HOME)/include
+CUDA_LIBS := -L$(CUDA_HOME)/lib64 -lcudart
+
+# cpp 12, sm80 is a30
+CUFLAGS := -std=c++12 -O3 -Xcompiler -fPIC -arch=sm_80 -rdc=true --use_fast_math
+
+GPU_SRCS := $(SRC_DIR)/gpu/GPU_LCS.cu
+GPU_OBJS := $(patsubst $(SRC_DIR)/%.cu,$(OBJ_DIR)/%.cu.o,$(GPU_SRCS))
+
+$(OBJ_DIR)/%.cu.o: $(SRC_DIR)/%.cu
+	@mkdir -p $(dir $@)
+	$(NVCC) $(CUFLAGS) $(CUDA_INC) -c $< -o $@
+
+
 famsa: $(OUT_BIN_DIR)/famsa
 $(OUT_BIN_DIR)/famsa: mimalloc_obj \
-	$(OBJ_MAIN) $(OBJ_CORE) $(OBJ_LCS) $(OBJ_TREE) $(OBJ_UTILS) $(OBJ_SIMD)
+	$(OBJ_MAIN) $(OBJ_CORE) $(OBJ_LCS) $(OBJ_TREE) $(OBJ_UTILS) $(OBJ_SIMD) $(GPU_OBJS)
 	-mkdir -p $(OUT_BIN_DIR)	
 	$(CXX) -o $@  \
 	$(MIMALLOC_OBJ) \
-	$(OBJ_MAIN) $(OBJ_CORE) $(OBJ_LCS) $(OBJ_TREE) $(OBJ_UTILS) $(OBJ_SIMD) \
-	$(LIBRARY_FILES) $(LINKER_FLAGS) $(LINKER_DIRS)
+	$(OBJ_MAIN) $(OBJ_CORE) $(OBJ_LCS) $(OBJ_TREE) $(OBJ_UTILS) $(OBJ_SIMD) $(GPU_OBJS) \
+	$(LIBRARY_FILES) $(LINKER_FLAGS) $(LINKER_DIRS) $(CUDA_LIBS)
 
 # *** Cleaning
 .PHONY: clean init
