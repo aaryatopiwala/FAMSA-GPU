@@ -60,7 +60,7 @@ __global__ void LCS_Kernel(
     }
 }
 
-void GPUcalculateDistanceVector(
+void computeLCSLengths(
 		CSequence* ref,
 		CSequence** sequences,
 		int n_seqs,

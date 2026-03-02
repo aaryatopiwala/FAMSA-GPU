@@ -23,7 +23,7 @@ struct GpuLCS {
     
 
     
-	void GPUcalculateDistanceVector(
+	void computeLCSLengths(
 		CSequence* ref,
 		CSequence** sequences,
 		int n_seqs,
