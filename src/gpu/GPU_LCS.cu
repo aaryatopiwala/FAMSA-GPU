@@ -16,46 +16,128 @@ __global__ void LCS_Kernel(
     const symbol_t* d_concat_seqs,
     //const symbol_t* d_ref,
     const uint64_t* d_ref_bitmasks,
+    uint64_t* d_carry,
     uint64_t* d_workspace,
     int bv_len,
+    int chunk_size,
+    int iteration_step_size,
     const int* d_offsets,
     const int* d_lengths,
     uint32_t* d_out_lcs,
     int batch_n)
 {
+    int gs = gridDim.x;
+    int bs = blockDim.x;
     int bx = blockIdx.x;
     int tx = threadIdx.x;
 
+    // Load reference bitmasks into shared memory for faster access for each block
+    extern __shared__ uint64_t s_ref_bitmasks[]; // shared memory for reference bitmasks, size will be NO_SYMBOLS * bv_len
+    if (tx < NO_SYMBOLS * bv_len) {
+        for (int i = tx; i < NO_SYMBOLS * bv_len; i+=bs) {
+            s_ref_bitmasks[i] = d_ref_bitmasks[i];
+        }   
+    }
+    __syncthreads(); // Wait for reference bitmasks to be loaded into shared memory
+
+    extern __shared__ uint64_t s_workspace[]; // shared memory workspace for bit vectors of the current row
+    extern __shared__ uint64_t s_carry[]; // shared memory for carry bits for the current wavefront step
+
     // serial method that will be parallelized later
-    if (tx == 0 && bx == 0){
+    // if (tx == 0 && bx == 0){
+    //     for (int i = 0; i < batch_n; ++i) {
+    //         const symbol_t* seq = d_concat_seqs + d_offsets[i];
+    //         int seq_len = d_lengths[i];
+    //         int ref_len = 0; // need to pass this in or compute from d_ref
+            
+    //         for (int w = 0; w < bv_len; ++w) {
+    //             d_workspace[w] = ~((uint64_t)0); // initialize workspace
+    //         }
+
+    //         for (int j = 0; j < seq_len; ++j) {
+    //             unsigned char c = seq[j];
+    //             if ( c == 22 || c >= 32) { // unknown symbol, or over symbol range, skip
+    //                 continue;
+    //             }
+    //             const uint64_t* s0b = d_ref_bitmasks + c * bv_len; // bitmask for symbol c
+    //             uint64_t carry = 0;
+    //             for (int w = 0; w < bv_len; ++w) {
+    //                 uint64_t V = d_workspace[w];
+    //                 uint64_t tb = V & s0b[w];
+    //                 uint64_t V2 = V + tb + carry;
+    //                 carry = (V2 < V) ? 1 : 0; // detect overflow
+    //                 d_workspace[w] = V2 | (V - tb);
+    //             }
+    //         }
+            
+    //         uint32_t res = 0;
+    //         for (int w = 0; w < bv_len; ++w) {
+    //             res += __popcll(~d_workspace[w]); // count set bits in ~workspace
+    //         }
+    //         d_out_lcs[i] = res; 
+    //     }
+    // }
+
+    if (bx == 0){
         for (int i = 0; i < batch_n; ++i) {
             const symbol_t* seq = d_concat_seqs + d_offsets[i];
             int seq_len = d_lengths[i];
             int ref_len = 0; // need to pass this in or compute from d_ref
             
-            for (int w = 0; w < bv_len; ++w) {
-                d_workspace[w] = ~((uint64_t)0); // initialize workspace
+            if (tx < bv_len) {
+                for (int w = tx; w < bv_len; w+=bs) {
+                    s_workspace[w] = ~((uint64_t)0); // initialize workspace, set bit vector of each chunk to all 1s
+                }
+            }
+            __syncthreads();
+
+            int num_steps = (seq_len + iteration_step_size - 1); // iterations are grouped into steps, bv_len is number of chunks
+            if (tx < num_steps){
+                for(int n = tx; n < num_steps; n+=bs) {
+                   //s_carry[n] = d_carry[n];
+                    s_carry[n] = 0; // initialize carry for each step to 0
+                }
+            }
+            __syncthreads(); // Wait for the whole row to be loaded
+
+            for (int k = 0; k < (bv_len + num_steps - 1); ++k) {
+                int i_min = max(0, k - (num_steps - 1));
+                int i_max = min(bv_len - 1, k);
+                if ((tx + i_min) <= i_max) {
+                    for (int s = tx; (i_min + s) <= i_max; s += bs) {
+                        int i = (bv_len - 1) - (i_min + s); // i is the vertical chunk index (0 to bv_len-1)
+                        int j = k - (i_min + s);  // j is the horizontal step index (0 to num_steps-1)
+
+                        // Process one wavefront block
+                        uint64_t step_carry = s_carry[j];
+                        for (int l=0; l<iteration_step_size; ++l) {
+                            int idx = j * iteration_step_size + l;
+                            if (idx >= seq_len) {
+                                break;
+                            }
+                            unsigned char c = seq[idx];
+                            if (c == 22 || c >= 32) { // unknown symbol, or over symbol range, skip
+                                continue;
+                            }
+                            const uint64_t* s0b = s_ref_bitmasks + c * bv_len; // bitmask for symbol c
+                            uint64_t carry = (step_carry >> l) & 0x1; // carry for current iteration
+                            uint64_t V = s_workspace[i];
+                            uint64_t tb = V & s0b[i]; // bits in chunk i that match current symbol
+                            uint64_t V2 = V + tb + carry;
+                            s_workspace[i] = V2 | (V - tb);
+                            carry = (V2 < V); // detect overflow
+                            step_carry = (step_carry & ~(1ULL << l)) | (carry << l); // update carry            
+                        }
+                        s_carry[j] = step_carry; // write back carry for this step
+                    }
+                }
+                __syncthreads();
             }
 
-            for (int j = 0; j < seq_len; ++j) {
-                unsigned char c = seq[j];
-                if ( c == 22 || c >= 32) { // unknown symbol, or over symbol range, skip
-                    continue;
-                }
-                const uint64_t* s0b = d_ref_bitmasks + c * bv_len; // bitmask for symbol c
-                uint64_t carry = 0;
-                for (int w = 0; w < bv_len; ++w) {
-                    uint64_t V = d_workspace[w];
-                    uint64_t tb = V & s0b[w];
-                    uint64_t V2 = V + tb + carry;
-                    carry = (V2 < V) ? 1 : 0; // detect overflow
-                    d_workspace[w] = V2 | (V - tb);
-                }
-            }
-            
+            // TODO: speedup using loop unrolling
             uint32_t res = 0;
-            for (int w = 0; w < bv_len; ++w) {
-                res += __popcll(~d_workspace[w]); // count set bits in ~workspace
+            for (int w = 0; w < bv_len; ++w) {  
+                res += __popcll(~s_workspace[w]); // count set bits in ~workspace
             }
             d_out_lcs[i] = res; 
         }
@@ -74,17 +156,21 @@ void GpuLCS::computeLCSLengths(
     const int BATCH_SIZE = 5000;
     auto pref = ref;
     int ref_len = pref->length;
-    int bv_len = (pref->data_size + 63) / 64; // number of 64-bit words needed for bitmask
+    int chunk_size = 64;
+    int bv_len = (pref->data_size + chunk_size - 1) / chunk_size; // number of chunks needed for bitmask
+    int iteration_step_size = 32; // number of characters each thread will process in the inner loop to amortize overhead. Tune this for best performance
     const symbol_t* ref_ptr = pref->data;
 
 
-    // find the longest possible length among batches to use for concat
+    // find the longest possible length among batches to use for concat, also max sequence length
     int max_batch_len = 0;
+    int max_seq_len = 0;
     for (int start = 0; start < n_seqs; start += BATCH_SIZE) {
         size_t cur = 0;
         int end = std::min(start + BATCH_SIZE, n_seqs);
         for (int i = start; i < end; ++i) {
             cur += sequences[i]->length;
+            max_seq_len = std::max(max_seq_len, sequences[i]->length);
         }
         max_batch_len = std::max(max_batch_len, (int)cur);
     }
@@ -122,8 +208,16 @@ void GpuLCS::computeLCSLengths(
         }
     }
 
-    uint64_t* d_workspace;
+    int num_steps = (max_seq_len + iteration_step_size - 1) / iteration_step_size; // number of steps needed to process the longest sequence in the batch
+    uint64_t* d_workspace;  // Allocate global memory scratchpad for bit vectors
     err = cudaMalloc(&d_workspace, nStreams * bv_len * sizeof(uint64_t)); // workspace for bit parallel computation. Need 1 workspace per stream
+    if (err != cudaSuccess) {
+        fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+        return;
+    }
+
+    uint64_t* d_carry; // Allocate global memory for carry bits, TDOD: maybe bv_len isn't needed in malloc
+    err = cudaMalloc(&d_carry, nStreams * num_steps * sizeof(uint64_t)); // carry for each 
     if (err != cudaSuccess) {
         fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
         return;
@@ -167,6 +261,7 @@ void GpuLCS::computeLCSLengths(
         int batch_idx = start / BATCH_SIZE;
         int stream_idx = batch_idx % nStreams;
         cudaStream_t currStream = streams[stream_idx];
+        uint64_t* currCarry = d_carry + stream_idx * num_steps; // carry for current stream
         uint64_t* currWorkspace = d_workspace + stream_idx * bv_len; // workspace for current stream
         // need a vector of the sequeneces
         // need the sequences and their offsets (easier to parallelize than just lengths)
@@ -229,7 +324,7 @@ void GpuLCS::computeLCSLengths(
         
         
         // asynch
-        LCS_Kernel<<<numBlocks, blockSize, 0, currStream>>>(d_concat_seqs, d_ref_bitmasks, currWorkspace, bv_len, d_offsets, d_lengths, d_out_lcs, batch_n);
+        LCS_Kernel<<<numBlocks, blockSize, 0, currStream>>>(d_concat_seqs, d_ref_bitmasks, currCarry, currWorkspace, bv_len, chunk_size, iteration_step_size, d_offsets, d_lengths, d_out_lcs, batch_n);
         
         // error check
         err = cudaGetLastError();
