@@ -100,31 +100,30 @@ __global__ void LCS_Kernel(
             }
             __syncthreads(); // Wait for the whole row to be loaded
 
-            for (int k = 0; k < (bv_len + num_steps - 1); ++k) {
+           for (int k = 0; k < (bv_len + num_steps - 1); ++k) {
                 int i_min = max(0, k - (num_steps - 1));
                 int i_max = min(bv_len - 1, k);
-                if ((tx + i_min) <= i_max) {
-                    for (int row = i_min + tx; row <= i_max; row += bs) {
-                        int i = row;
-                        int j = k - row;
-                        
-                        uint64_t carry = s_carry[i * num_steps + j];
-                        unsigned char c = seq[j];
-                        if (c != 22 && c < 32) {
-                            const uint64_t* s0b = s_ref_bitmasks + c * bv_len;
-                            uint64_t V = s_workspace[i];
-                            uint64_t tb = V & s0b[i];
-                            uint64_t sum1 = V + tb;
-                            uint64_t V2 = sum1 + carry;
-                            s_workspace[i] = V2 | (V - tb);
-                            carry = (sum1 < V) || (V2 < sum1);
-                        }
-                        if (i + 1 < bv_len) {
-                            s_carry[(i + 1) * num_steps + j] = carry;
-                        }
+
+                for (int row = i_min + tx; row <= i_max; row += bs) {
+                    int i = row;
+                    int j = k - row;
+
+                    uint64_t carry = s_carry[i * num_steps + j];
+                    unsigned char c = seq[j];
+                    if (c != 22 && c < 32) {
+                        const uint64_t* s0b = s_ref_bitmasks + c * bv_len;
+                        uint64_t V = s_workspace[i];
+                        uint64_t tb = V & s0b[i];
+                        uint64_t sum1 = V + tb;
+                        uint64_t V2 = sum1 + carry;
+                        s_workspace[i] = V2 | (V - tb);
+                        carry = (sum1 < V) || (V2 < sum1);
                     }
+                    if (i + 1 < bv_len)
+                        s_carry[(i + 1) * num_steps + j] = carry;
+                }
+                __syncthreads();
             }
-            __syncthreads();
 
             uint32_t res = 0;
             for (int w = 0; w < bv_len; ++w) {  
