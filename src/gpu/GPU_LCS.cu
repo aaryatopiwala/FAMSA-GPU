@@ -79,8 +79,9 @@ __global__ void LCS_Kernel(
     //     }
     // }
 
-    if (bx == 0){
-        for (int i = 0; i < batch_n; ++i) {
+    // if (bx == 0){
+        // for (int i = 0; i < batch_n; ++i) {
+        for (int i = bx; i < batch_n; i += gs) {
             const symbol_t* seq = d_concat_seqs + d_offsets[i];
             int seq_len = d_lengths[i];
             int ref_len = 0; // need to pass this in or compute from d_ref
@@ -131,7 +132,7 @@ __global__ void LCS_Kernel(
             }
             d_out_lcs[i] = res; 
         }
-    }
+    // }
 }
 
 void GpuLCS::computeLCSLengths(
@@ -309,8 +310,8 @@ void GpuLCS::computeLCSLengths(
         }
 
         // 3. do kernel
-        int numBlocks = 1;
-        int blockSize = 32;
+        int numBlocks = 128;
+        int blockSize = 16;
         
         
         // asynch
