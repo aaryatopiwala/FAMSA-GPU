@@ -144,7 +144,7 @@ void GpuLCS::computeLCSLengths(
 {
 
     // 1. bitmasks are already in ref
-    const int BATCH_SIZE = 5000;
+    const int BATCH_SIZE = 4000;
     auto pref = ref;
     int ref_len = pref->length;
     int chunk_size = 64;
@@ -183,7 +183,7 @@ void GpuLCS::computeLCSLengths(
         return;
     }
 
-    int nStreams = 4;
+    int nStreams = 1;
     std::vector<cudaStream_t> streams(nStreams);
     std::vector<cudaEvent_t> events(nStreams);
     for (int i = 0; i < nStreams; ++i) {
@@ -310,8 +310,8 @@ void GpuLCS::computeLCSLengths(
         }
 
         // 3. do kernel
-        int numBlocks = 128;
-        int blockSize = 16;
+        int numBlocks = 1024;
+        int blockSize = 64;
         
         
         // asynch

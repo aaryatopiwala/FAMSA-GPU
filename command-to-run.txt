@@ -1,0 +1,1 @@
+/opt/launch-sh/bin/launch.sh -v a30 -c 8 -g 1 -m 16 -i yatisht/ece213-wi26:latest -f ./FAMSA-GPU/run-commands.sh

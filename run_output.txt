@@ -1,0 +1,59 @@
+===== FAMSA Benchmark =====
+Directory: /home/diw011/FAMSA-GPU
+
+Compiling...
+*** Initialization of submodules ***
+*** Initialization of global values ***
+*** Unspecified platform - using native compilation for x86_64 ***
+*** Adding mimalloc ***
+*** Proposing zlib-ng ***
+*** Proposing isal ***
+zlib-ng will be used for gzip decompression
+*** Adding libdeflate ***
+*** Adding REFRESH libs ***
+Prebuild jobs: mimalloc_obj zlib-ng libdeflate
+*** Checking compiler version ***
+Compiler: GCC
+Version: 11
+/usr/local/cuda-12.3/bin/nvcc -std=c++20 -O3 -Xcompiler -fPIC -arch=sm_80 -rdc=true --use_fast_math -I/usr/local/cuda-12.3/include -c src/gpu/GPU_LCS.cu -o obj/gpu/GPU_LCS.cu.o
+src/gpu/GPU_LCS.cu(87): warning #177-D: variable "ref_len" was declared but never referenced
+              int ref_len = 0;
+                  ^
+
+Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
+
+src/gpu/GPU_LCS.cu(149): warning #177-D: variable "ref_len" was declared but never referenced
+      int ref_len = pref->length;
+          ^
+
+src/gpu/GPU_LCS.cu(153): warning #177-D: variable "ref_ptr" was declared but never referenced
+      const symbol_t* ref_ptr = pref->data;
+                      ^
+
+mkdir -p bin	
+/usr/local/cuda-12.3/bin/nvcc -o bin/famsa  \
+./libs/mimalloc/mimalloc.o \
+obj//famsa.cpp.o  obj//msa.cpp.o  obj//msa_refinement.cpp.o obj/core/io_service.cpp.o  obj/core/params.cpp.o  obj/core/profile.cpp.o  obj/core/profile_par.cpp.o  obj/core/profile_seq.cpp.o  obj/core/queues.cpp.o  obj/core/sequence.cpp.o obj/lcs/lcsbp.cpp.o  obj/lcs/lcsbp_classic.cpp.o obj/tree/AbstractTreeGenerator.cpp.o  obj/tree/Clustering.cpp.o  obj/tree/DistanceCalculator.cpp.o  obj/tree/FastTree.cpp.o  obj/tree/GuideTree.cpp.o  obj/tree/MSTPrim.cpp.o  obj/tree/NeighborJoining.cpp.o  obj/tree/NewickParser.cpp.o  obj/tree/SingleLinkage.cpp.o  obj/tree/UPGMA.cpp.o obj/utils/log.cpp.o  obj/utils/timer.cpp.o  obj/utils/utils.cpp.o  obj/simd/lcsbp_avx_intr.cpp.o  obj/simd/lcsbp_avx2_intr.cpp.o  obj/simd/lcsbp_avx512_intr.cpp.o  obj/simd/utils_avx.cpp.o  obj/simd/utils_avx2.cpp.o obj/gpu/GPU_LCS.cu.o \
+./libs/zlib-ng/build-g++/zlib-ng/libz.a ./libs/libdeflate/build/libdeflate.a -lm -lpthread -L ./libs/zlib-ng/build-g++/zlib-ng -L ./libs/libdeflate -L/usr/local/cuda-12.3/lib64 -lcudart
+nvlink warning : SM Arch ('sm_52') not found in 'obj/gpu/GPU_LCS.cu.o'
+
+===== CPU Run =====
+FAMSA (Fast and Accurate Multiple Sequence Alignment) 
+  version 2.5.0-7b0bce7 (2025-07-07)
+  S. Deorowicz, A. Debudaj-Grabysz, A. Gudys
+
+Done!
+5.35user 8.12system 0:03.65elapsed 368%CPU (0avgtext+0avgdata 94516maxresident)k
+0inputs+2319160outputs (0major+702minor)pagefaults 0swaps
+
+===== GPU Run =====
+FAMSA (Fast and Accurate Multiple Sequence Alignment) 
+  version 2.5.0-7b0bce7 (2025-07-07)
+  S. Deorowicz, A. Debudaj-Grabysz, A. Gudys
+
+CUDA enabled
+Done!
+16.04user 5.60system 0:10.51elapsed 205%CPU (0avgtext+0avgdata 336768maxresident)k
+0inputs+2319152outputs (1major+23865minor)pagefaults 0swaps
+
+===== Done =====
