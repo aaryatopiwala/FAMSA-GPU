@@ -22,11 +22,11 @@ src/gpu/GPU_LCS.cu(87): warning #177-D: variable "ref_len" was declared but neve
 
 Remark: The warnings can be suppressed with "-diag-suppress <warning-number>"
 
-src/gpu/GPU_LCS.cu(149): warning #177-D: variable "ref_len" was declared but never referenced
+src/gpu/GPU_LCS.cu(153): warning #177-D: variable "ref_len" was declared but never referenced
       int ref_len = pref->length;
           ^
 
-src/gpu/GPU_LCS.cu(153): warning #177-D: variable "ref_ptr" was declared but never referenced
+src/gpu/GPU_LCS.cu(157): warning #177-D: variable "ref_ptr" was declared but never referenced
       const symbol_t* ref_ptr = pref->data;
                       ^
 
@@ -43,8 +43,8 @@ FAMSA (Fast and Accurate Multiple Sequence Alignment)
   S. Deorowicz, A. Debudaj-Grabysz, A. Gudys
 
 Done!
-5.35user 8.12system 0:03.65elapsed 368%CPU (0avgtext+0avgdata 94516maxresident)k
-0inputs+2319160outputs (0major+702minor)pagefaults 0swaps
+5.09user 7.67system 0:03.57elapsed 357%CPU (0avgtext+0avgdata 94760maxresident)k
+2552inputs+2319160outputs (13major+703minor)pagefaults 0swaps
 
 ===== GPU Run =====
 FAMSA (Fast and Accurate Multiple Sequence Alignment) 
@@ -53,7 +53,7 @@ FAMSA (Fast and Accurate Multiple Sequence Alignment)
 
 CUDA enabled
 Done!
-16.04user 5.60system 0:10.51elapsed 205%CPU (0avgtext+0avgdata 336768maxresident)k
-0inputs+2319152outputs (1major+23865minor)pagefaults 0swaps
+21.89user 4.91system 0:13.55elapsed 197%CPU (0avgtext+0avgdata 355200maxresident)k
+0inputs+2319152outputs (20major+25520minor)pagefaults 0swaps
 
 ===== Done =====

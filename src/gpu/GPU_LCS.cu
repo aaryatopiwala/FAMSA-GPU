@@ -126,12 +126,16 @@ __global__ void LCS_Kernel(
                 __syncthreads();
             }
 
-            uint32_t res = 0;
-            for (int w = 0; w < bv_len; ++w) {  
-                res += __popcll(~s_workspace[w]); // count set bits in ~workspace
+            if (tx == 0) {
+                uint32_t res = 0;
+                for (int w = 0; w < bv_len; ++w) {
+                    res += __popcll(~s_workspace[w]);
+                }
+                d_out_lcs[b] = res;
             }
-            d_out_lcs[b] = res; 
+        __syncthreads();
         }
+
     // }
 }
 
@@ -311,7 +315,7 @@ void GpuLCS::computeLCSLengths(
 
         // 3. do kernel
         int numBlocks = 1024;
-        int blockSize = 64;
+        int blockSize = 256;
         
         
         // asynch
