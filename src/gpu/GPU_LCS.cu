@@ -81,9 +81,9 @@ __global__ void LCS_Kernel(
 
     // if (bx == 0){
         // for (int i = 0; i < batch_n; ++i) {
-        for (int i = bx; i < batch_n; i += gs) {
-            const symbol_t* seq = d_concat_seqs + d_offsets[i];
-            int seq_len = d_lengths[i];
+        for (int b = bx; b < batch_n; b += gs) {
+            const symbol_t* seq = d_concat_seqs + d_offsets[b];
+            int seq_len = d_lengths[b];
             int ref_len = 0; // need to pass this in or compute from d_ref
             
             if (tx < bv_len) {
@@ -130,7 +130,7 @@ __global__ void LCS_Kernel(
             for (int w = 0; w < bv_len; ++w) {  
                 res += __popcll(~s_workspace[w]); // count set bits in ~workspace
             }
-            d_out_lcs[i] = res; 
+            d_out_lcs[b] = res; 
         }
     // }
 }
