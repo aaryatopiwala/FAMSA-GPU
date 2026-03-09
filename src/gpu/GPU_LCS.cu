@@ -443,7 +443,7 @@ void GpuLCS::computeLCSLengths(
 
 
  // Old synchronous version
- 
+
 /*
 void GpuLCS::computeLCSLengths(
 		CSequence* ref,
@@ -535,12 +535,12 @@ void GpuLCS::computeLCSLengths(
         for (int i = 0; i < batch_n; ++i) {
             max_seq_len = std::max(max_seq_len, h_lengths[i]);
         }
-        num_steps = (max_seq_len + iteration_step_size - 1) / iteration_step_size;
+        int num_steps = (max_seq_len + iteration_step_size - 1) / iteration_step_size;
         err = cudaMalloc(&d_carry, num_steps * sizeof(uint64_t));
         err = cudaMemset(d_carry, 0, num_steps * sizeof(uint64_t)); // initialize carry to 0
         // 3. do kernel
-        int numBlocks = 1;
-        int blockSize = 1;
+        int numBlocks = 1024;
+        int blockSize = 256;
         size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len + bv_len * num_steps) * sizeof(uint64_t);
         LCS_Kernel<<<numBlocks, blockSize, smem_bytes>>>(d_concat_seqs, d_ref_bitmasks, d_carry, d_workspace, bv_len, chunk_size, iteration_step_size, d_offsets, d_lengths, d_out_lcs, batch_n);
 
