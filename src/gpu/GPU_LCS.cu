@@ -190,6 +190,12 @@ void GpuLCS::computeLCSLengths(
     int nStreams = 1;
     std::vector<cudaStream_t> streams(nStreams);
     std::vector<cudaEvent_t> events(nStreams);
+    std::vector<cudaEvent_t> h2d_start(nStreams);
+    std::vector<cudaEvent_t> h2d_stop(nStreams);
+    std::vector<cudaEvent_t> kernel_start(nStreams);
+    std::vector<cudaEvent_t> kernel_stop(nStreams);
+    std::vector<cudaEvent_t> d2h_start(nStreams);
+    std::vector<cudaEvent_t> d2h_stop(nStreams);
     for (int i = 0; i < nStreams; ++i) {
         err = cudaStreamCreate(&streams[i]);
         if (err != cudaSuccess) {
@@ -197,6 +203,36 @@ void GpuLCS::computeLCSLengths(
             return;
         }
         err = cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            return;
+        }
+        err = cudaEventCreate(&h2d_start[i]);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            return;
+        }
+        err = cudaEventCreate(&h2d_stop[i]);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            return;
+        }
+        err = cudaEventCreate(&kernel_start[i]);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            return;
+        }
+        err = cudaEventCreate(&kernel_stop[i]);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            return;
+        }
+        err = cudaEventCreate(&d2h_start[i]);
+        if (err != cudaSuccess) {
+            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            return;
+        }
+        err = cudaEventCreate(&d2h_stop[i]);
         if (err != cudaSuccess) {
             fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
@@ -296,6 +332,11 @@ void GpuLCS::computeLCSLengths(
                 out_vector[prev_start + i] = h_out_pool_pinned[stream_idx * stream_output_len / sizeof(uint32_t) + i];
             }
             stream_busy[stream_idx] = false;
+            float ms_h2d = 0, ms_kernel = 0, ms_d2h = 0;
+            cudaEventElapsedTime(&ms_h2d, h2d_start[stream_idx], h2d_stop[stream_idx]);
+            cudaEventElapsedTime(&ms_kernel, kernel_start[stream_idx], kernel_stop[stream_idx]);
+            cudaEventElapsedTime(&ms_d2h, d2h_start[stream_idx], d2h_stop[stream_idx]);
+            printf("Stream %d batch %d: H2D=%.2f ms, Kernel=%.2f ms, D2H=%.2f ms\n", stream_idx, stream_batch_start[stream_idx] / BATCH_SIZE, ms_h2d, ms_kernel, ms_d2h);
         }
 
         size_t concat_size = h_concat_seqs.size() * sizeof(symbol_t);
@@ -304,6 +345,7 @@ void GpuLCS::computeLCSLengths(
         memcpy(h_lengths_pinned, h_lengths.data(), batch_n * sizeof(int));
 
         // copy data to GPU asynchronously
+        cudaEventRecord(h2d_start[stream_idx], currStream);
         err = cudaMemcpyAsync(d_concat_seqs, h_concat_seqs_pinned, h_concat_seqs.size() * sizeof(symbol_t), cudaMemcpyHostToDevice, currStream);
         //err = cudaMemcpyAsync(d_ref, h_ref_pinned, ref_len * sizeof(symbol_t), cudaMemcpyHostToDevice, currStream);
         err = cudaMemcpyAsync(d_offsets, h_offsets_pinned, batch_n * sizeof(int), cudaMemcpyHostToDevice, currStream);
@@ -312,6 +354,7 @@ void GpuLCS::computeLCSLengths(
             fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)) ;
             return;
         }
+        cudaEventRecord(h2d_stop[stream_idx], currStream);
 
         // 3. do kernel
         int numBlocks = 1024;
@@ -319,9 +362,11 @@ void GpuLCS::computeLCSLengths(
         
         
         // asynch
+        cudaEventRecord(kernel_start[stream_idx], currStream);
         size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len + bv_len * num_steps) * sizeof(uint64_t);
         LCS_Kernel<<<numBlocks, blockSize, smem_bytes, currStream>>>(d_concat_seqs, d_ref_bitmasks, currCarry, currWorkspace, bv_len, chunk_size, iteration_step_size, d_offsets, d_lengths, d_out_lcs, batch_n);
-        
+        cudaEventRecord(kernel_stop[stream_idx], currStream);
+
         // error check
         err = cudaGetLastError();
         if (err != cudaSuccess) {
@@ -332,11 +377,13 @@ void GpuLCS::computeLCSLengths(
 
         // 4. gpu to host
 
+        cudaEventRecord(d2h_start[stream_idx], currStream);
         err = cudaMemcpyAsync(h_out_lcs_pinned, d_out_lcs, batch_n * sizeof(uint32_t), cudaMemcpyDeviceToHost, currStream);
         if (err != cudaSuccess) {
             fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
+        cudaEventRecord(d2h_stop[stream_idx], currStream);
 
         cudaEventRecord(events[stream_idx], currStream);
         stream_busy[stream_idx] = true;
@@ -356,6 +403,11 @@ void GpuLCS::computeLCSLengths(
             for (int j = 0; j < prev_n; ++j) {
                 out_vector[prev_start + j] = host_slice[j];
             }
+            float ms_h2d = 0, ms_kernel = 0, ms_d2h = 0;
+            cudaEventElapsedTime(&ms_h2d, h2d_start[i], h2d_stop[i]);
+            cudaEventElapsedTime(&ms_kernel, kernel_start[i], kernel_stop[i]);
+            cudaEventElapsedTime(&ms_d2h, d2h_start[i], d2h_stop[i]);
+            printf("Stream %d batch %d: H2D=%.2f ms, Kernel=%.2f ms, D2H=%.2f ms\n", i, stream_batch_start[i] / BATCH_SIZE, ms_h2d, ms_kernel, ms_d2h);
         }
     }
 
@@ -374,6 +426,15 @@ void GpuLCS::computeLCSLengths(
     for (int i = 0; i < nStreams; ++i) {
         cudaStreamDestroy(streams[i]);
         cudaEventDestroy(events[i]);
+    }
+
+    for (int i = 0; i < nStreams; ++i) {
+        cudaEventDestroy(h2d_start[i]);
+        cudaEventDestroy(h2d_stop[i]);
+        cudaEventDestroy(kernel_start[i]);
+        cudaEventDestroy(kernel_stop[i]);
+        cudaEventDestroy(d2h_start[i]);
+        cudaEventDestroy(d2h_stop[i]);
     }
 
 
