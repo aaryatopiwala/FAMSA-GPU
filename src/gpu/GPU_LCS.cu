@@ -139,6 +139,7 @@ __global__ void LCS_Kernel(
     // }
 }
 
+    
 void GpuLCS::computeLCSLengths(
 		CSequence* ref,
 		CSequence** sequences,
@@ -441,8 +442,9 @@ void GpuLCS::computeLCSLengths(
 }
 
 
-/* Old synchronous version
-
+ // Old synchronous version
+ 
+/*
 void GpuLCS::computeLCSLengths(
 		CSequence* ref,
 		CSequence** sequences,
@@ -501,13 +503,14 @@ void GpuLCS::computeLCSLengths(
 
         // allocate gpu mem
         symbol_t* d_concat_seqs;
-        symbol_t* d_ref;
+        //symbol_t* d_ref;
         int* d_offsets;
         int* d_lengths;
         uint32_t* d_out_lcs; // output lcs lengths
+        uint64_t* d_carry; 
 
         err = cudaMalloc(&d_concat_seqs, h_concat_seqs.size() * sizeof(symbol_t));
-        err = cudaMalloc(&d_ref, ref_len * sizeof(symbol_t));
+        //err = cudaMalloc(&d_ref, ref_len * sizeof(symbol_t));
         err = cudaMalloc(&d_offsets, batch_n * sizeof(int));
         err = cudaMalloc(&d_lengths, batch_n * sizeof(int));
         err = cudaMalloc(&d_out_lcs, batch_n * sizeof(uint32_t));
@@ -518,7 +521,7 @@ void GpuLCS::computeLCSLengths(
         
         // copy data to GPU
         err = cudaMemcpy(d_concat_seqs, h_concat_seqs.data(), h_concat_seqs.size() * sizeof(symbol_t), cudaMemcpyHostToDevice);
-        err = cudaMemcpy(d_ref, ref_ptr, ref_len * sizeof(symbol_t), cudaMemcpyHostToDevice);
+        //err = cudaMemcpy(d_ref, ref_ptr, ref_len * sizeof(symbol_t), cudaMemcpyHostToDevice);
         err = cudaMemcpy(d_offsets, h_offsets.data(), batch_n * sizeof(int), cudaMemcpyHostToDevice);
         err = cudaMemcpy(d_lengths, h_lengths.data(), batch_n * sizeof(int), cudaMemcpyHostToDevice);
         if (err != cudaSuccess) {
@@ -526,10 +529,20 @@ void GpuLCS::computeLCSLengths(
             return;
         }
 
+        int iteration_step_size = 1;
+        int chunk_size = 64;
+        int max_seq_len = 0;
+        for (int i = 0; i < batch_n; ++i) {
+            max_seq_len = std::max(max_seq_len, h_lengths[i]);
+        }
+        num_steps = (max_seq_len + iteration_step_size - 1) / iteration_step_size;
+        err = cudaMalloc(&d_carry, num_steps * sizeof(uint64_t));
+        err = cudaMemset(d_carry, 0, num_steps * sizeof(uint64_t)); // initialize carry to 0
         // 3. do kernel
         int numBlocks = 1;
         int blockSize = 1;
-        LCS_Kernel<<<numBlocks, blockSize>>>(d_concat_seqs, d_ref, d_ref_bitmasks, d_workspace, bv_len, d_offsets, d_lengths, d_out_lcs, batch_n);
+        size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len + bv_len * num_steps) * sizeof(uint64_t);
+        LCS_Kernel<<<numBlocks, blockSize, smem_bytes>>>(d_concat_seqs, d_ref_bitmasks, d_carry, d_workspace, bv_len, chunk_size, iteration_step_size, d_offsets, d_lengths, d_out_lcs, batch_n);
 
         // error check
         err = cudaGetLastError();
@@ -557,7 +570,8 @@ void GpuLCS::computeLCSLengths(
 
         // 5. free gpu mem
         cudaFree(d_concat_seqs);
-        cudaFree(d_ref);
+        //cudaFree(d_ref);
+        cudaFree(d_carry);
         
         cudaFree(d_offsets);
         cudaFree(d_lengths);
@@ -570,6 +584,5 @@ void GpuLCS::computeLCSLengths(
 
 
 }
-
 
 */
