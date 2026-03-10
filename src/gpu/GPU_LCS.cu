@@ -352,10 +352,11 @@ void GpuLCS::computeLCSLengths(
         CLCSBP& lcsbp)
 {
     const int BATCH_SIZE = 4000;
+    const int nStreams   = 4;
     auto pref = ref;
     int bv_len = (pref->data_size + 63) / 64;
 
-    // Fixed-size pools — persist across calls
+    // Fixed-size pools — persist across calls, sized for nStreams
     static int*         d_offset_pool        = nullptr;
     static int*         h_offset_pool_pinned = nullptr;
     static int*         d_length_pool        = nullptr;
@@ -366,12 +367,12 @@ void GpuLCS::computeLCSLengths(
 
     if (!initialized) {
         cudaError_t err;
-        err = cudaMalloc    (&d_offset_pool,        BATCH_SIZE * sizeof(int));
-        err = cudaMallocHost(&h_offset_pool_pinned, BATCH_SIZE * sizeof(int));
-        err = cudaMalloc    (&d_length_pool,        BATCH_SIZE * sizeof(int));
-        err = cudaMallocHost(&h_length_pool_pinned, BATCH_SIZE * sizeof(int));
-        err = cudaMalloc    (&d_out_pool,           BATCH_SIZE * sizeof(uint32_t));
-        err = cudaMallocHost(&h_out_pool_pinned,    BATCH_SIZE * sizeof(uint32_t));
+        err = cudaMalloc    (&d_offset_pool,        BATCH_SIZE * sizeof(int)      * nStreams);
+        err = cudaMallocHost(&h_offset_pool_pinned, BATCH_SIZE * sizeof(int)      * nStreams);
+        err = cudaMalloc    (&d_length_pool,        BATCH_SIZE * sizeof(int)      * nStreams);
+        err = cudaMallocHost(&h_length_pool_pinned, BATCH_SIZE * sizeof(int)      * nStreams);
+        err = cudaMalloc    (&d_out_pool,           BATCH_SIZE * sizeof(uint32_t) * nStreams);
+        err = cudaMallocHost(&h_out_pool_pinned,    BATCH_SIZE * sizeof(uint32_t) * nStreams);
         if (err != cudaSuccess) {
             fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
@@ -405,9 +406,8 @@ void GpuLCS::computeLCSLengths(
         return;
     }
 
-    int nStreams = 2;
     std::vector<cudaStream_t> streams(nStreams);
-    std::vector<cudaEvent_t> events(nStreams);
+    std::vector<cudaEvent_t>  events(nStreams);
     for (int i = 0; i < nStreams; ++i) {
         err = cudaStreamCreate(&streams[i]);
         if (err != cudaSuccess) {
@@ -486,13 +486,16 @@ void GpuLCS::computeLCSLengths(
         }
 
         if (bv_len <= 4) {
+            // printf("A");
             LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
         } else if (bv_len <= 32) {
+            printf("B");
             size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
             LCS_Kernel_WarpPerSeq<<<1024, 128, smem, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
         } else {
+            printf("C");
             size_t smem = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
             LCS_Kernel_BlockSerial<<<1024, 32, smem, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
