@@ -10,6 +10,7 @@
 #include <iostream>
 #include "../core/sequence.h"
 #include <cuda_runtime.h>
+#include <chrono>
 
 
 __global__ void LCS_Kernel(
@@ -149,6 +150,8 @@ void GpuLCS::computeLCSLengths(
 {
 
     // 1. bitmasks are already in ref
+    // start time
+    auto start_time = std::chrono::high_resolution_clock::now();
     const int BATCH_SIZE = 4000;
     auto pref = ref;
     int ref_len = pref->length;
@@ -286,6 +289,10 @@ void GpuLCS::computeLCSLengths(
     std::vector<int> stream_batch_start(nStreams, 0); // track which batch is in which stream
     std::vector<int> stream_batch_n(nStreams, 0); // track batch size for each stream
 
+    //end time before batching starts
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << "GPU setup time: " << duration.count() << " ms" << std::endl;
     // 2. Divide sequences into batches and send to GPU
     for (int start = 0; start < n_seqs; start += BATCH_SIZE) {
      
@@ -438,6 +445,10 @@ void GpuLCS::computeLCSLengths(
         cudaEventDestroy(d2h_stop[i]);
     }
 
+    // end of batching time
+    end_time2 = std::chrono::high_resolution_clock::now();
+    auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end_time2 - end_time);
+    std::cout << "GPU batching and computation time: " << duration2.count() << " ms" << std::endl;
 
 }
 
