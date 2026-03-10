@@ -14,7 +14,7 @@
 
 // Persistent GPU/host pools (allocate once, reuse across calls)
 static bool g_pools_inited = false;
-static int g_nStreams_default = 4;
+static int g_nStreams_default = 1;
 
 static symbol_t* g_d_concat_pool = nullptr;
 static symbol_t* g_h_concat_pool_pinned = nullptr;
@@ -53,10 +53,9 @@ static bool ensureGpuPools(int nStreams,
                           int num_steps)
 {
     cudaError_t err;
-    if (!g_pools_inited) {
-        g_nStreams_default = nStreams;
-        g_pools_inited = true;
-    }
+
+    g_nStreams_default = nStreams;
+    g_pools_inited = true;
 
     // concat pool (per-stream capacity)
     if (stream_concat_len_elems > g_stream_concat_len_cap) {
@@ -307,10 +306,9 @@ void GpuLCS::computeLCSLengths(
         h_ref_bitmasks[j] = pref->p_bit_masks[j];
     }
 
-    // We'll copy h_ref_bitmasks into the persistent device pool after ensuring pools are sized
     cudaError_t err = cudaSuccess;
 
-    int nStreams = 4;
+    int nStreams = g_nStreams_default;
     std::vector<cudaStream_t> streams(nStreams);
     std::vector<cudaEvent_t> events(nStreams);
     std::vector<cudaEvent_t> h2d_start(nStreams);
@@ -322,42 +320,42 @@ void GpuLCS::computeLCSLengths(
     for (int i = 0; i < nStreams; ++i) {
         err = cudaStreamCreate(&streams[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR streams: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR events: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreate(&h2d_start[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR h2d_start: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreate(&h2d_stop[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR h2d_stop: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreate(&kernel_start[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR kernel_start: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreate(&kernel_stop[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR kernel_stop: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreate(&d2h_start[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR d2h_start: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
         err = cudaEventCreate(&d2h_stop[i]);
         if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
+            fprintf(stderr, "GPU_ERROR d2h_stop: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
             return;
         }
     }
