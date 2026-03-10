@@ -446,7 +446,7 @@ void GpuLCS::computeLCSLengths(
     }
 
     // end of batching time
-    end_time2 = std::chrono::high_resolution_clock::now();
+    auto end_time2 = std::chrono::high_resolution_clock::now();
     auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end_time2 - end_time);
     std::cout << "GPU batching and computation time: " << duration2.count() << " ms" << std::endl;
 
