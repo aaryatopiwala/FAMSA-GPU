@@ -308,6 +308,7 @@ void GpuLCS::computeLCSLengths(
         std::vector<symbol_t> h_concat_seqs; // concatenated sequences for the batch
         std::vector<int> h_offsets(batch_n);
         std::vector<int> h_lengths(batch_n);
+        h_concat_seqs.reserve(batch_n * max_seq_len); // reserve enough space to avoid reallocations
         int running_offset = 0;
         for (int i = 0; i < batch_n; ++i) {
             auto pseq = sequences[start + i];
@@ -408,9 +409,10 @@ void GpuLCS::computeLCSLengths(
             int prev_start = stream_batch_start[i];
             int prev_n = stream_batch_n[i];
             uint32_t* host_slice = h_out_pool_pinned + i * stream_output_len / sizeof(uint32_t);
-            for (int j = 0; j < prev_n; ++j) {
-                out_vector[prev_start + j] = host_slice[j];
-            }
+            //for (int j = 0; j < prev_n; ++j) {
+            //    out_vector[prev_start + j] = host_slice[j];
+            //}
+            memcpy(out_vector + prev_start, host_slice, prev_n * sizeof(uint32_t));
             float ms_h2d = 0, ms_kernel = 0, ms_d2h = 0;
             cudaEventElapsedTime(&ms_h2d, h2d_start[i], h2d_stop[i]);
             cudaEventElapsedTime(&ms_kernel, kernel_start[i], kernel_stop[i]);
