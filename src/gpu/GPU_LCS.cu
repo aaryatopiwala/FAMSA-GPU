@@ -430,7 +430,7 @@ void GpuLCS::computeLCSLengths(
             int prev_start = stream_batch_start[stream_idx];
             int prev_n = stream_batch_n[stream_idx];
             for (int i = 0; i < prev_n; ++i) {
-                out_vector[prev_start + i] = h_out_pool_pinned[stream_idx * stream_output_len / sizeof(uint32_t) + i];
+                out_vector[prev_start + i] = g_h_out_pool_pinned[stream_idx * stream_output_len / sizeof(uint32_t) + i];
             }
             stream_busy[stream_idx] = false;
             float ms_h2d = 0, ms_kernel = 0, ms_d2h = 0;
@@ -500,7 +500,7 @@ void GpuLCS::computeLCSLengths(
             cudaEventSynchronize(events[i]);
             int prev_start = stream_batch_start[i];
             int prev_n = stream_batch_n[i];
-            uint32_t* host_slice = h_out_pool_pinned + i * stream_output_len / sizeof(uint32_t);
+            uint32_t* host_slice = g_h_out_pool_pinned + i * stream_output_len / sizeof(uint32_t);
             //for (int j = 0; j < prev_n; ++j) {
             //    out_vector[prev_start + j] = host_slice[j];
             //}
