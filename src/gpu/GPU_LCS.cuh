@@ -54,7 +54,7 @@ void GPUcalculateDistanceVector(
 		// end time, print duration
 		auto end_time = std::chrono::high_resolution_clock::now();
 		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
-		std::cout << "GPU computation time: " << duration.count() << " ms" << std::endl;
+		//std::cout << "GPU computation time: " << duration.count() << " ms" << std::endl;
         // apply transform locally
         auto ref_len = seq_to_ptr(ref)->length;
         for (int i = 0; i < n_seqs; ++i) {
@@ -64,7 +64,7 @@ void GPUcalculateDistanceVector(
 		//end time 2 print duration
 		auto end_time_2 = std::chrono::high_resolution_clock::now();
 		auto duration_2 = std::chrono::duration_cast<std::chrono::milliseconds>(end_time_2 - end_time);
-		std::cout << "Host transform time: " << duration_2.count() << " ms" << std::endl;
+		//std::cout << "Host transform time: " << duration_2.count() << " ms" << std::endl;
     
 }
 

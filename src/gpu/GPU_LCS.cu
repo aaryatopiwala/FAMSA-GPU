@@ -437,7 +437,7 @@ void GpuLCS::computeLCSLengths(
             cudaEventElapsedTime(&ms_h2d, h2d_start[stream_idx], h2d_stop[stream_idx]);
             cudaEventElapsedTime(&ms_kernel, kernel_start[stream_idx], kernel_stop[stream_idx]);
             cudaEventElapsedTime(&ms_d2h, d2h_start[stream_idx], d2h_stop[stream_idx]);
-            printf("Stream %d batch %d: H2D=%.2f ms, Kernel=%.2f ms, D2H=%.2f ms\n", stream_idx, stream_batch_start[stream_idx] / BATCH_SIZE, ms_h2d, ms_kernel, ms_d2h);
+            //printf("Stream %d batch %d: H2D=%.2f ms, Kernel=%.2f ms, D2H=%.2f ms\n", stream_idx, stream_batch_start[stream_idx] / BATCH_SIZE, ms_h2d, ms_kernel, ms_d2h);
         }
 
         size_t concat_size = h_concat_seqs.size() * sizeof(symbol_t);
@@ -509,7 +509,7 @@ void GpuLCS::computeLCSLengths(
             cudaEventElapsedTime(&ms_h2d, h2d_start[i], h2d_stop[i]);
             cudaEventElapsedTime(&ms_kernel, kernel_start[i], kernel_stop[i]);
             cudaEventElapsedTime(&ms_d2h, d2h_start[i], d2h_stop[i]);
-            printf("Stream %d batch %d: H2D=%.2f ms, Kernel=%.2f ms, D2H=%.2f ms\n", i, stream_batch_start[i] / BATCH_SIZE, ms_h2d, ms_kernel, ms_d2h);
+            //printf("Stream %d batch %d: H2D=%.2f ms, Kernel=%.2f ms, D2H=%.2f ms\n", i, stream_batch_start[i] / BATCH_SIZE, ms_h2d, ms_kernel, ms_d2h);
         }
     }
 
