@@ -381,15 +381,10 @@ void GpuLCS::computeLCSLengths(
         return;
     }
 
-    // Copy reference bitmasks into persistent device buffer only if ref changed
     size_t ref_bytes = (size_t)NO_SYMBOLS * bv_len * sizeof(uint64_t);
-    if (g_last_ref_bitmasks_ptr != pref->p_bit_masks || g_last_bv_len != (size_t)bv_len) {
-        err = cudaMemcpy(g_d_ref_bitmasks, h_ref_bitmasks.data(), ref_bytes, cudaMemcpyHostToDevice);
-        if (err != cudaSuccess) { printCudaError("cudaMemcpy d_ref_bitmasks", err); return; }
-        g_last_ref_bitmasks_ptr = pref->p_bit_masks;
-        g_last_bv_len = bv_len;
-    }
-
+    err = cudaMemcpy(g_d_ref_bitmasks, h_ref_bitmasks.data(), ref_bytes, cudaMemcpyHostToDevice);
+    if (err != cudaSuccess) { printCudaError("cudaMemcpy d_ref_bitmasks", err); return; }
+    
     std::vector<bool> stream_busy(nStreams, false); // track which streams are busy
     std::vector<int> stream_batch_start(nStreams, 0); // track which batch is in which stream
     std::vector<int> stream_batch_n(nStreams, 0); // track batch size for each stream
