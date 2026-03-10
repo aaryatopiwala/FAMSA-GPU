@@ -14,211 +14,10 @@
 #include <math.h>
 
 
-// __global__ void LCS_Kernel(
-//     const symbol_t* d_concat_seqs,
-//     //const symbol_t* d_ref,
-//     const uint64_t* d_ref_bitmasks,
-//     uint64_t* d_carry,
-//     uint64_t* d_workspace,
-//     int bv_len,
-//     int chunk_size,
-//     int iteration_step_size,
-//     const int* d_offsets,
-//     const int* d_lengths,
-//     uint32_t* d_out_lcs,
-//     int batch_n)
-// {
-//     int gs = gridDim.x;
-//     int bs = blockDim.x;
-//     int bx = blockIdx.x;
-//     int tx = threadIdx.x;
-
-//     extern __shared__ uint64_t shared_mem[];
-//     uint64_t* s_ref_bitmasks = shared_mem;                          // shared memory for reference bitmasks, size will be NO_SYMBOLS * bv_len
-//     uint64_t* s_workspace    = shared_mem + NO_SYMBOLS * bv_len;    // shared memory workspace for bit vectors of the current row
-//     uint64_t* s_carry        = s_workspace + bv_len;                // shared memory for carry bits for the current wavefront step
-
-//     // Load reference bitmasks into shared memory for faster access for each block
-//     if (tx < NO_SYMBOLS * bv_len) {
-//         for (int i = tx; i < NO_SYMBOLS * bv_len; i+=bs) {
-//             s_ref_bitmasks[i] = d_ref_bitmasks[i];
-//         }   
-//     }
-//     __syncthreads(); // Wait for reference bitmasks to be loaded into shared memory
-
-//     // serial method that will be parallelized later
-//     // if (tx == 0 && bx == 0){
-//     //     for (int i = 0; i < batch_n; ++i) {
-//     //         const symbol_t* seq = d_concat_seqs + d_offsets[i];
-//     //         int seq_len = d_lengths[i];
-//     //         int ref_len = 0; // need to pass this in or compute from d_ref
-            
-//     //         for (int w = 0; w < bv_len; ++w) {
-//     //             s_workspace[w] = ~((uint64_t)0); // initialize workspace
-//     //         }
-
-//     //         for (int j = 0; j < seq_len; ++j) {
-//     //             unsigned char c = seq[j];
-//     //             if ( c == 22 || c >= 32) { // unknown symbol, or over symbol range, skip
-//     //                 continue;
-//     //             }
-//     //             const uint64_t* s0b = s_ref_bitmasks + c * bv_len; // bitmask for symbol c
-//     //             uint64_t carry = 0;
-//     //             for (int w = 0; w < bv_len; ++w) {
-//     //                 uint64_t V = s_workspace[w];
-//     //                 uint64_t tb = V & s0b[w];
-//     //                 uint64_t V2 = V + tb + carry;
-//     //                 carry = (V2 < V) ? 1 : 0; // detect overflow
-//     //                 s_workspace[w] = V2 | (V - tb);
-//     //             }
-//     //         }
-            
-//     //         uint32_t res = 0;
-//     //         for (int w = 0; w < bv_len; ++w) {
-//     //             res += __popcll(~s_workspace[w]); // count set bits in ~workspace
-//     //         }
-//     //         d_out_lcs[i] = res; 
-//     //     }
-//     // }
-
-//     // if (bx == 0){
-//         // for (int i = 0; i < batch_n; ++i) {
-//         for (int b = bx; b < batch_n; b += gs) {
-//             const symbol_t* seq = d_concat_seqs + d_offsets[b];
-//             int seq_len = d_lengths[b];
-//             int ref_len = 0; // need to pass this in or compute from d_ref
-            
-//             if (tx < bv_len) {
-//                 for (int w = tx; w < bv_len; w+=bs) {
-//                     s_workspace[w] = ~((uint64_t)0); // initialize workspace, set bit vector of each chunk to all 1s
-//                 }
-//             }
-//             __syncthreads();
-
-//             int num_steps = (seq_len + iteration_step_size - 1) / iteration_step_size;
-//             if (tx < num_steps){
-//                 for (int n = tx; n < bv_len * num_steps; n += bs){
-//                     s_carry[n] = 0;
-//                 }
-//             }
-//             __syncthreads(); // Wait for the whole row to be loaded
-
-//            for (int k = 0; k < (bv_len + num_steps - 1); ++k) {
-//                 int i_min = max(0, k - (num_steps - 1));
-//                 int i_max = min(bv_len - 1, k);
-
-//                 for (int row = i_min + tx; row <= i_max; row += bs) {
-//                     int i = row;
-//                     int j = k - row;
-
-//                     uint64_t carry = s_carry[i * num_steps + j];
-//                     unsigned char c = seq[j];
-//                     if (c != 22 && c < 32) {
-//                         const uint64_t* s0b = s_ref_bitmasks + c * bv_len;
-//                         uint64_t V = s_workspace[i];
-//                         uint64_t tb = V & s0b[i];
-//                         uint64_t sum1 = V + tb;
-//                         uint64_t V2 = sum1 + carry;
-//                         s_workspace[i] = V2 | (V - tb);
-//                         carry = (sum1 < V) || (V2 < sum1);
-//                     }
-//                     if (i + 1 < bv_len)
-//                         s_carry[(i + 1) * num_steps + j] = carry;
-//                 }
-//                 __syncthreads();
-//             }
-
-//             if (tx == 0) {
-//                 uint32_t res = 0;
-//                 for (int w = 0; w < bv_len; ++w) {
-//                     res += __popcll(~s_workspace[w]);
-//                 }
-//                 d_out_lcs[b] = res;
-//             }
-//         __syncthreads();
-//         }
-
-//     // }
-// }
-
-__global__ void LCS_Kernel_WarpPerSeq(
-    const symbol_t* __restrict__ d_concat_seqs,
-    const uint64_t* __restrict__ d_ref_bitmasks,
-    const int* __restrict__ d_offsets,
-    const int* __restrict__ d_lengths,
-    uint32_t* __restrict__ d_out_lcs,
-    int bv_len,
-    int batch_n)
-{
-    extern __shared__ uint64_t s_bitmasks[];
-
-    int tid = threadIdx.x;
-    int lane = tid & 31;
-    int warp_id = (blockIdx.x * blockDim.x + tid) / 32;
-    int total_warps = (gridDim.x * blockDim.x) / 32;
-
-    //All threads load the bitmask table into Smem
-    for (int i = tid; i < NO_SYMBOLS * bv_len; i += blockDim.x) {
-        s_bitmasks[i] = d_ref_bitmasks[i];
-    }
-    __syncthreads();
-
-    const unsigned FULL_MASK = 0xffffffffu;
-
-    for (int b = warp_id; b < batch_n; b += total_warps) {
-        const symbol_t* seq = d_concat_seqs + d_offsets[b];
-        int seq_len = d_lengths[b];
-
-        // Each lane manages one 64 bit word
-        uint64_t V = (lane < bv_len) ? ~0ull : 0ull;
-
-        for (int j = 0; j < seq_len; ++j) {
-            // Broadcast
-            symbol_t c = seq[j]; 
-
-            // Skip invalid symbols
-            if (c == 22 || c >= 32) continue;
-
-            uint64_t mask_word = (lane < bv_len) ? s_bitmasks[(int)c * bv_len + lane] : 0ull;
-            
-            //BIT PARALLEL
-            uint64_t tb = V & mask_word;
-            uint64_t sum1 = V + tb;
-            uint64_t minus = V - tb;
-
-            // OPTIMIZED RIPPLE CARRY
-            uint64_t carry = 0;
-            uint64_t carry_out = (sum1 < V) ? 1ull : 0ull; // carry generated
-
-            // Parallel prefix scan
-            for (int stride = 1; stride < bv_len; stride *= 2) {
-                uint64_t incoming = __shfl_up_sync(FULL_MASK, carry_out, stride);
-                if (lane >= stride && lane < bv_len) {
-                    // Re add carry
-                    uint64_t new_sum = sum1 + incoming;
-                    carry_out |= (new_sum < sum1) ? 1ull : 0ull;
-                    sum1 = new_sum;
-                }
-            }
-
-            if (lane < bv_len) {
-                V = sum1 | minus;
-            }
-        }
-        // REDUCTION
-        uint32_t local_pop = (lane < bv_len) ? __popcll(~V) : 0u;
-        for (int offset = 16; offset > 0; offset /= 2) {
-            local_pop += __shfl_down_sync(FULL_MASK, local_pop, offset);
-        }
-
-        if (lane == 0) {
-            d_out_lcs[b] = local_pop;
-        }
-    }
-}
 
 
-__global__ void LCS_Kernel_BlockSerial(
+
+__global__ void LCS_Kernel(
     const symbol_t* d_concat_seqs,
     const uint64_t* d_ref_bitmasks,
     const int* d_offsets,
@@ -233,8 +32,8 @@ __global__ void LCS_Kernel_BlockSerial(
     int tx = threadIdx.x;
 
     extern __shared__ uint64_t shared_mem[];
-    uint64_t* s_ref_bitmasks = shared_mem; // NO_SYMBOLS * bv_len
-    uint64_t* s_workspace = shared_mem + NO_SYMBOLS * bv_len; // bv_len
+    uint64_t* s_ref_bitmasks = shared_mem;                       // NO_SYMBOLS * bv_len
+    uint64_t* s_workspace    = shared_mem + NO_SYMBOLS * bv_len; // bv_len
 
     // Load reference bitmasks into shared memory
     for (int i = tx; i < NO_SYMBOLS * bv_len; i += bs) {
@@ -242,7 +41,7 @@ __global__ void LCS_Kernel_BlockSerial(
     }
     __syncthreads();
 
-    // Grid stride over sequences
+    // Grid-stride over sequences
     for (int b = bx; b < batch_n; b += gs) {
         const symbol_t* seq = d_concat_seqs + d_offsets[b];
         int seq_len = d_lengths[b];
@@ -253,12 +52,13 @@ __global__ void LCS_Kernel_BlockSerial(
         }
         __syncthreads();
 
-        // process sequence positions serially using rolling scalar carry
+        // Priority 1 cleanup:
+        // process sequence positions serially, using only a rolling scalar carry
         if (tx == 0) {
             for (int j = 0; j < seq_len; ++j) {
                 unsigned char c = seq[j];
 
-                // Skip invalid
+                // Skip invalid / unknown symbols
                 if (c == 22 || c >= 32) {
                     continue;
                 }
@@ -284,9 +84,11 @@ __global__ void LCS_Kernel_BlockSerial(
             }
             d_out_lcs[b] = res;
         }
+
         __syncthreads();
     }
 }
+
 
 void GpuLCS::computeLCSLengths(
 		CSequence* ref,
@@ -299,6 +101,7 @@ void GpuLCS::computeLCSLengths(
     // 1. bitmasks are already in ref
     const int BATCH_SIZE = 4000;
     auto pref = ref;
+    int ref_len = pref->length;
     int bv_len = (pref->data_size + 63) / 64;
 
 
@@ -386,8 +189,10 @@ void GpuLCS::computeLCSLengths(
         int batch_idx = start / BATCH_SIZE;
         int stream_idx = batch_idx % nStreams;
         cudaStream_t currStream = streams[stream_idx];
+        // need a vector of the sequeneces
+        // need the sequences and their offsets (easier to parallelize than just lengths)
 
-        std::vector<symbol_t> h_concat_seqs;
+        std::vector<symbol_t> h_concat_seqs; // concatenated sequences for the batch
         std::vector<int> h_offsets(batch_n);
         std::vector<int> h_lengths(batch_n);
         int running_offset = 0;
@@ -441,52 +246,19 @@ void GpuLCS::computeLCSLengths(
 
         
         // 3. do kernel
-        // int numBlocks = 1024;
-        // int blockSize = 64;
+        int numBlocks = 1024;
+        int blockSize = 64;
         
-        // size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
-        // LCS_Kernel_BlockSerial<<<numBlocks, blockSize, smem_bytes, currStream>>>(
-        //     d_concat_seqs,
-        //     d_ref_bitmasks,
-        //     d_offsets,
-        //     d_lengths,
-        //     d_out_lcs,
-        //     bv_len,
-        //     batch_n);
+        size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
+        LCS_Kernel<<<numBlocks, blockSize, smem_bytes, currStream>>>(
+            d_concat_seqs,
+            d_ref_bitmasks,
+            d_offsets,
+            d_lengths,
+            d_out_lcs,
+            bv_len,
+            batch_n);
 
-        if (bv_len <= 32) {
-            int blockSize = 128;
-            int numBlocks = 1024;
-            
-            LCS_Kernel_WarpPerSeq<<<numBlocks, blockSize, 0, currStream>>>(
-                d_concat_seqs,
-                d_ref_bitmasks,
-                d_offsets,
-                d_lengths,
-                d_out_lcs,
-                bv_len,
-                batch_n);
-        } else {
-            int blockSize = 128;
-            int numBlocks = 1024;
-
-            size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
-            LCS_Kernel_BlockSerial<<<numBlocks, blockSize, smem_bytes, currStream>>>(
-                d_concat_seqs,
-                d_ref_bitmasks,
-                d_offsets,
-                d_lengths,
-                d_out_lcs,
-                bv_len,
-                batch_n);
-        }
-
-        err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR after kernel launch: %s (%s)\n",
-                    cudaGetErrorString(err), cudaGetErrorName(err));
-            return;
-        }
         // 4. gpu to host
 
         err = cudaMemcpyAsync(h_out_lcs_pinned, d_out_lcs, batch_n * sizeof(uint32_t), cudaMemcpyDeviceToHost, currStream);
