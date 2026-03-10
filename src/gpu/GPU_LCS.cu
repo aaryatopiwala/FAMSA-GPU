@@ -141,6 +141,62 @@
 //     // }
 // }
 
+__global__ void LCS_Kernel_ThreadPerSeq(
+    const symbol_t* __restrict__ d_concat_seqs,
+    const uint64_t* __restrict__ d_ref_bitmasks,
+    const int* __restrict__ d_offsets,
+    const int* __restrict__ d_lengths,
+    uint32_t* __restrict__ d_out_lcs,
+    int bv_len,
+    int batch_n)
+{
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int stride = gridDim.x * blockDim.x;
+
+    for (int b = tid; b < batch_n; b += stride) {
+        const symbol_t* seq = d_concat_seqs + d_offsets[b];
+        int seq_len = d_lengths[b];
+
+        // Small fixed local workspace.
+        uint64_t V_local[4];
+
+        // Initialize workspace to all 1s
+        for (int w = 0; w < bv_len; ++w) {
+            V_local[w] = ~0ull;
+        }
+
+        for (int j = 0; j < seq_len; ++j) {
+            unsigned char c = seq[j];
+
+            if (c == 22 || c >= 32) {
+                continue;
+            }
+
+            const uint64_t* s0b = d_ref_bitmasks + ((int)c) * bv_len;
+            uint64_t carry = 0;
+
+            for (int w = 0; w < bv_len; ++w) {
+                uint64_t V  = V_local[w];
+                uint64_t tb = V & s0b[w];
+
+                uint64_t sum1 = V + tb;
+                uint64_t V2   = sum1 + carry;
+
+                carry = (sum1 < V) || (V2 < sum1);
+                V_local[w] = V2 | (V - tb);
+            }
+        }
+
+        uint32_t res = 0;
+        for (int w = 0; w < bv_len; ++w) {
+            res += __popcll(~V_local[w]);
+        }
+
+        d_out_lcs[b] = res;
+    }
+}
+
+
 __global__ void LCS_Kernel_WarpPerSeq(
     const symbol_t* __restrict__ d_concat_seqs,
     const uint64_t* __restrict__ d_ref_bitmasks,
@@ -454,11 +510,40 @@ void GpuLCS::computeLCSLengths(
         //     bv_len,
         //     batch_n);
 
-        if (bv_len <= 32) {
-            int blockSize = 128;
-            int numBlocks = 1024;
+        // if (bv_len <= 32) {
+        //     int blockSize = 128;
+        //     int numBlocks = 1024;
             
-            LCS_Kernel_WarpPerSeq<<<numBlocks, blockSize, 0, currStream>>>(
+        //     LCS_Kernel_WarpPerSeq<<<numBlocks, blockSize, 0, currStream>>>(
+        //         d_concat_seqs,
+        //         d_ref_bitmasks,
+        //         d_offsets,
+        //         d_lengths,
+        //         d_out_lcs,
+        //         bv_len,
+        //         batch_n);
+        // } else {
+        //     int blockSize = 128;
+        //     int numBlocks = 1024;
+
+        //     size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
+        //     LCS_Kernel_BlockSerial<<<numBlocks, blockSize, smem_bytes, currStream>>>(
+        //         d_concat_seqs,
+        //         d_ref_bitmasks,
+        //         d_offsets,
+        //         d_lengths,
+        //         d_out_lcs,
+        //         bv_len,
+        //         batch_n);
+        // }
+
+        if (bv_len <= 4) {
+            // Small-width
+            int blockSize = 256;
+            int numBlocks = 64;
+            printf("A");
+
+            LCS_Kernel_ThreadPerSeq<<<numBlocks, blockSize, 0, currStream>>>(
                 d_concat_seqs,
                 d_ref_bitmasks,
                 d_offsets,
@@ -466,11 +551,32 @@ void GpuLCS::computeLCSLengths(
                 d_out_lcs,
                 bv_len,
                 batch_n);
-        } else {
+        }
+        else if (bv_len <= 32) {
+            // Medium-width case
             int blockSize = 128;
             int numBlocks = 1024;
+            printf("B");
+
+            size_t smem_bytes = (NO_SYMBOLS * bv_len) * sizeof(uint64_t);
+
+            LCS_Kernel_WarpPerSeq<<<numBlocks, blockSize, smem_bytes, currStream>>>(
+                d_concat_seqs,
+                d_ref_bitmasks,
+                d_offsets,
+                d_lengths,
+                d_out_lcs,
+                bv_len,
+                batch_n);
+        }
+        else {
+            // Large-width
+            int blockSize = 32;
+            int numBlocks = 1024;
+            printf("C");
 
             size_t smem_bytes = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
+
             LCS_Kernel_BlockSerial<<<numBlocks, blockSize, smem_bytes, currStream>>>(
                 d_concat_seqs,
                 d_ref_bitmasks,
@@ -480,6 +586,7 @@ void GpuLCS::computeLCSLengths(
                 bv_len,
                 batch_n);
         }
+
 
         err = cudaGetLastError();
         if (err != cudaSuccess) {
