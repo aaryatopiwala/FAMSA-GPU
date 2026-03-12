@@ -482,16 +482,16 @@ void GpuLCS::computeLCSLengths(
         }
 
         if (bv_len <= 4) {
-            printf("Using ThreadPerSeq kernel\n");
+            //printf("Using ThreadPerSeq kernel\n");
             LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
         } else if (bv_len <= 32) {
-            printf("Using WarpPerSeq kernel\n");
+            //printf("Using WarpPerSeq kernel\n");
             size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
             LCS_Kernel_WarpPerSeq<<<1024, 128, smem, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
         } else {
-            printf("Using BlockSerial kernel\n");
+            //printf("Using BlockSerial kernel\n");
             size_t smem = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
             LCS_Kernel_BlockSerial<<<1024, 32, smem, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
