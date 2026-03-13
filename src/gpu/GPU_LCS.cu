@@ -157,7 +157,7 @@ __global__ void LCS_Kernel_ThreadPerSeq(
         const symbol_t* seq = d_concat_seqs + d_offsets[b];
         int seq_len = d_lengths[b];
 
-        // Small fixed local workspace.
+        // Small fixed local workspace
         uint64_t V_local[4];
 
         // Initialize workspace to all 1s
@@ -180,7 +180,7 @@ __global__ void LCS_Kernel_ThreadPerSeq(
                 uint64_t tb = V & s0b[w];
 
                 uint64_t sum1 = V + tb;
-                uint64_t V2   = sum1 + carry;
+                uint64_t V2 = sum1 + carry;
 
                 carry = (sum1 < V) || (V2 < sum1);
                 V_local[w] = V2 | (V - tb);
@@ -208,71 +208,100 @@ __global__ void LCS_Kernel_WarpPerSeq(
 {
     extern __shared__ uint64_t s_bitmasks[];
 
-    int tid = threadIdx.x;
-    int lane = tid & 31;
-    int warp_id = (blockIdx.x * blockDim.x + tid) / 32;
-    int total_warps = (gridDim.x * blockDim.x) / 32;
+    const int tid = threadIdx.x;
+    const int lane = tid & 31;
+    const int warp_in_block = tid >> 5;
+    const int warps_per_block = blockDim.x >> 5;
 
-    //All threads load the bitmask table into Smem
+    const int global_warp_id = blockIdx.x * warps_per_block + warp_in_block;
+    const int total_warps = gridDim.x * warps_per_block;
+
+    const unsigned FULL_MASK = 0xffffffffu;
+    const unsigned ACTIVE_MASK = (bv_len == 32) ? 0xffffffffu : ((1u << bv_len) - 1u);
+
     for (int i = tid; i < NO_SYMBOLS * bv_len; i += blockDim.x) {
         s_bitmasks[i] = d_ref_bitmasks[i];
     }
     __syncthreads();
 
-    const unsigned FULL_MASK = 0xffffffffu;
-
-    for (int b = warp_id; b < batch_n; b += total_warps) {
+    for (int b = global_warp_id; b < batch_n; b += total_warps) {
         const symbol_t* seq = d_concat_seqs + d_offsets[b];
-        int seq_len = d_lengths[b];
-
-        // Each lane manages one 64 bit word
+        const int seq_len = d_lengths[b];
         uint64_t V = (lane < bv_len) ? ~0ull : 0ull;
 
         for (int j = 0; j < seq_len; ++j) {
-            // Broadcast
-            symbol_t c = seq[j]; 
+            // symbol_t c = 0;
+            // if (lane == 0) c = seq[j];
+            // c = __shfl_sync(FULL_MASK, c, 0);
+            symbol_t c = seq[j];
+            if (c == 22 || c >= 32) {
+                continue;
+            }
 
-            // Skip invalid symbols
-            if (c == 22 || c >= 32) continue;
+            uint64_t mask_word = (lane < bv_len)
+                ? s_bitmasks[(int)c * bv_len + lane]
+                : 0ull;
 
-            uint64_t mask_word = (lane < bv_len) ? s_bitmasks[(int)c * bv_len + lane] : 0ull;
-            
-            //BIT PARALLEL
-            uint64_t tb = V & mask_word;
-            uint64_t sum1 = V + tb;
+            uint64_t tb  = V & mask_word;
+            uint64_t sum1  = V + tb;
             uint64_t minus = V - tb;
 
-            // OPTIMIZED RIPPLE CARRY
-            uint64_t carry = 0;
-            uint64_t carry_out = (sum1 < V) ? 1ull : 0ull; // carry generated
-
-            // Parallel prefix scan
-            for (int stride = 1; stride < bv_len; stride *= 2) {
-                uint64_t incoming = __shfl_up_sync(FULL_MASK, carry_out, stride);
-                if (lane >= stride && lane < bv_len) {
-                    // Re add carry
-                    uint64_t new_sum = sum1 + incoming;
-                    carry_out |= (new_sum < sum1) ? 1ull : 0ull;
-                    sum1 = new_sum;
-                }
+            // carry_out = g | (p & carry_in)
+            unsigned g = 0u;
+            unsigned p = 0u;
+            if (lane < bv_len) {
+                g = (sum1 < V) ? 1u : 0u;
+                p = (sum1 == 0xffffffffffffffffull) ? 1u : 0u;
             }
+            // Build bitmasks
+            unsigned gmask = __ballot_sync(FULL_MASK, g);
+            unsigned pmask = __ballot_sync(FULL_MASK, p);
+
+            // Ignore inactive lanes
+            gmask &= ACTIVE_MASK;
+            pmask &= ACTIVE_MASK;
+
+            // Parallel prefix in 32-bit scalar
+            unsigned G = gmask;
+            unsigned P = pmask;
+
+            G |= P & (G << 1);
+            P &= (P << 1);
+
+            G |= P & (G << 2);
+            P &= (P << 2);
+
+            G |= P & (G << 4);
+            P &= (P << 4);
+
+            G |= P & (G << 8);
+            P &= (P << 8);
+
+            G |= P & (G << 16);
+
+            // lane_i carry_in is carry-out of lane i-1
+            unsigned carry_mask = (G << 1) & ACTIVE_MASK;
+            unsigned carry_in   = (lane < bv_len) ? ((carry_mask >> lane) & 1u) : 0u;
 
             if (lane < bv_len) {
-                V = sum1 | minus;
+                uint64_t V2 = sum1 + (uint64_t)carry_in;
+                V = V2 | minus;
             }
         }
-        // REDUCTION
         uint32_t local_pop = (lane < bv_len) ? __popcll(~V) : 0u;
-        for (int offset = 16; offset > 0; offset /= 2) {
-            local_pop += __shfl_down_sync(FULL_MASK, local_pop, offset);
-        }
+
+        // Warp reduction
+        local_pop += __shfl_down_sync(FULL_MASK, local_pop, 16);
+        local_pop += __shfl_down_sync(FULL_MASK, local_pop, 8);
+        local_pop += __shfl_down_sync(FULL_MASK, local_pop, 4);
+        local_pop += __shfl_down_sync(FULL_MASK, local_pop, 2);
+        local_pop += __shfl_down_sync(FULL_MASK, local_pop, 1);
 
         if (lane == 0) {
             d_out_lcs[b] = local_pop;
         }
     }
 }
-
 
 __global__ void LCS_Kernel_BlockSerial(
     const symbol_t* d_concat_seqs,
@@ -289,21 +318,21 @@ __global__ void LCS_Kernel_BlockSerial(
     int tx = threadIdx.x;
 
     extern __shared__ uint64_t shared_mem[];
-    uint64_t* s_ref_bitmasks = shared_mem; // NO_SYMBOLS * bv_len
-    uint64_t* s_workspace = shared_mem + NO_SYMBOLS * bv_len; // bv_len
+    uint64_t* s_ref_bitmasks = shared_mem;
+    uint64_t* s_workspace = shared_mem + NO_SYMBOLS * bv_len;
 
-    // Load reference bitmasks into shared memory
+    // Load reference bitmask
     for (int i = tx; i < NO_SYMBOLS * bv_len; i += bs) {
         s_ref_bitmasks[i] = d_ref_bitmasks[i];
     }
     __syncthreads();
 
-    // Grid stride over sequences
+    // Grid stride
     for (int b = bx; b < batch_n; b += gs) {
         const symbol_t* seq = d_concat_seqs + d_offsets[b];
         int seq_len = d_lengths[b];
 
-        // Initialize workspace to all 1s
+        // Initialize workspace
         for (int w = tx; w < bv_len; w += bs) {
             s_workspace[w] = ~((uint64_t)0);
         }
@@ -485,11 +514,26 @@ void GpuLCS::computeLCSLengths(
             //printf("Using ThreadPerSeq kernel\n");
             LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
+
+            // printf("bv_len = %d", bv_len);
+
+            // size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
+            // LCS_Kernel_WarpPerSeq<<<512, 256, smem, currStream>>>(
+            //     d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
+
         } else if (bv_len <= 32) {
             //printf("Using WarpPerSeq kernel\n");
+
             size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
-            LCS_Kernel_WarpPerSeq<<<1024, 128, smem, currStream>>>(
+            LCS_Kernel_WarpPerSeq<<<512, 256, smem, currStream>>>(
                 d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
+            
+            // printf("bv_len = %d", bv_len);
+
+
+            // LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
+            //     d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
+
         } else {
             //printf("Using BlockSerial kernel\n");
             size_t smem = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
