@@ -1,4 +1,3 @@
-
 #include "GPU_LCS.cuh"
 #include <vector>
 #include <stdint.h>
@@ -373,172 +372,191 @@ __global__ void LCS_Kernel_BlockSerial(
     }
 }
 
-void GpuLCS::computeLCSLengths(
-        CSequence* ref,
-        CSequence** sequences,
-        int n_seqs,
-        uint32_t* out_vector,
-        CLCSBP& lcsbp)
-{
-    const int BATCH_SIZE = 4000;
-    const int nStreams   = 2;
-    auto pref = ref;
-    int bv_len = (pref->data_size + 63) / 64;
+struct GpuLCSContext {
+    static constexpr int BATCH_SIZE = 4000;
+    static constexpr int N_STREAMS  = 2;
 
-    static int*          d_offset_pool        = nullptr;
-    static int*          h_offset_pool_pinned = nullptr;
-    static int*          d_length_pool        = nullptr;
-    static int*          h_length_pool_pinned = nullptr;
-    static uint32_t*     d_out_pool           = nullptr;
-    static uint32_t*     h_out_pool_pinned    = nullptr;
-    static symbol_t*     d_concat_pool        = nullptr;
-    static symbol_t*     h_concat_pool_pinned = nullptr;
-    static size_t        alloc_concat_len     = 0;
-    static cudaStream_t  streams[nStreams];
-    static cudaEvent_t   events[nStreams];
-    static bool          initialized          = false;
+    int*         d_offset_pool        = nullptr;
+    int*         h_offset_pool_pinned = nullptr;
+    int*         d_length_pool        = nullptr;
+    int*         h_length_pool_pinned = nullptr;
+    uint32_t*    d_out_pool           = nullptr;
+    uint32_t*    h_out_pool_pinned    = nullptr;
+    symbol_t*    d_concat_pool        = nullptr;
+    symbol_t*    h_concat_pool_pinned = nullptr;
+    size_t       alloc_concat_len     = 0;
+    cudaStream_t streams[N_STREAMS]   = {};
+    cudaEvent_t  events[N_STREAMS]    = {};
+    bool         initialized          = false;
 
-    if (!initialized) {
+    uint64_t*    d_ref_bitmasks   = nullptr;
+    int          cached_bv_len    = -1;
+    const void*  cached_ref_ptr   = nullptr;
+
+    bool init() {
         cudaError_t err;
-        err = cudaMalloc    (&d_offset_pool,        BATCH_SIZE * sizeof(int)      * nStreams);
-        err = cudaMallocHost(&h_offset_pool_pinned, BATCH_SIZE * sizeof(int)      * nStreams);
-        err = cudaMalloc    (&d_length_pool,        BATCH_SIZE * sizeof(int)      * nStreams);
-        err = cudaMallocHost(&h_length_pool_pinned, BATCH_SIZE * sizeof(int)      * nStreams);
-        err = cudaMalloc    (&d_out_pool,           BATCH_SIZE * sizeof(uint32_t) * nStreams);
-        err = cudaMallocHost(&h_out_pool_pinned,    BATCH_SIZE * sizeof(uint32_t) * nStreams);
-        for (int i = 0; i < nStreams; ++i) {
-            err = cudaStreamCreate(&streams[i]);
-            err = cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming);
-        }
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
-            return;
+        err = cudaMalloc    (&d_offset_pool,        BATCH_SIZE * sizeof(int)      * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        err = cudaMallocHost(&h_offset_pool_pinned, BATCH_SIZE * sizeof(int)      * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        err = cudaMalloc    (&d_length_pool,        BATCH_SIZE * sizeof(int)      * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        err = cudaMallocHost(&h_length_pool_pinned, BATCH_SIZE * sizeof(int)      * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        err = cudaMalloc    (&d_out_pool,           BATCH_SIZE * sizeof(uint32_t) * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        err = cudaMallocHost(&h_out_pool_pinned,    BATCH_SIZE * sizeof(uint32_t) * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        for (int i = 0; i < N_STREAMS; ++i) {
+            err = cudaStreamCreate(&streams[i]);                                 if (err != cudaSuccess) return fail(err);
+            err = cudaEventCreateWithFlags(&events[i], cudaEventDisableTiming);  if (err != cudaSuccess) return fail(err);
         }
         initialized = true;
+        return true;
     }
 
-    // Compute max batch concat length for this call
-    int max_batch_len = 0;
-    for (int start = 0; start < n_seqs; start += BATCH_SIZE) {
+    bool ensureConcatPool(size_t needed) {
+        if (needed <= alloc_concat_len) return true;
+        if (d_concat_pool)        { cudaFree(d_concat_pool);            d_concat_pool        = nullptr; }
+        if (h_concat_pool_pinned) { cudaFreeHost(h_concat_pool_pinned); h_concat_pool_pinned = nullptr; }
+        cudaError_t err;
+        err = cudaMalloc    (&d_concat_pool,        needed * sizeof(symbol_t) * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        err = cudaMallocHost(&h_concat_pool_pinned, needed * sizeof(symbol_t) * N_STREAMS); if (err != cudaSuccess) return fail(err);
+        alloc_concat_len = needed;
+        return true;
+    }
+
+    bool ensureRefBitmasks(const void* ref_ptr, const void* src, int bv_len_in) {
+        if (ref_ptr == cached_ref_ptr && bv_len_in == cached_bv_len)
+            return true;
+
+        if (d_ref_bitmasks) { cudaFree(d_ref_bitmasks); d_ref_bitmasks = nullptr; }
+
+        cudaError_t err;
+        err = cudaMalloc(&d_ref_bitmasks, (size_t)NO_SYMBOLS * bv_len_in * sizeof(uint64_t));
+        if (err != cudaSuccess) return fail(err);
+        err = cudaMemcpy(d_ref_bitmasks, src,
+                        (size_t)NO_SYMBOLS * bv_len_in * sizeof(uint64_t),
+                        cudaMemcpyHostToDevice);
+        if (err != cudaSuccess) { cudaFree(d_ref_bitmasks); d_ref_bitmasks = nullptr; return fail(err); }
+
+        cached_ref_ptr = ref_ptr;
+        cached_bv_len  = bv_len_in;
+        return true;
+    }
+
+    ~GpuLCSContext() {
+        if (!initialized) return;
+        for (int i = 0; i < N_STREAMS; ++i) {
+            cudaStreamDestroy(streams[i]);
+            cudaEventDestroy(events[i]);
+        }
+        if (d_ref_bitmasks)       cudaFree(d_ref_bitmasks);
+        if (d_concat_pool)        cudaFree(d_concat_pool);
+        if (h_concat_pool_pinned) cudaFreeHost(h_concat_pool_pinned);
+        if (d_offset_pool)        cudaFree(d_offset_pool);
+        if (h_offset_pool_pinned) cudaFreeHost(h_offset_pool_pinned);
+        if (d_length_pool)        cudaFree(d_length_pool);
+        if (h_length_pool_pinned) cudaFreeHost(h_length_pool_pinned);
+        if (d_out_pool)           cudaFree(d_out_pool);
+        if (h_out_pool_pinned)    cudaFreeHost(h_out_pool_pinned);
+    }
+
+private:
+    static bool fail(cudaError_t err) {
+        fprintf(stderr, "GPU_ERROR (GpuLCSContext): %s (%s)\n",
+                cudaGetErrorString(err), cudaGetErrorName(err));
+        return false;
+    }
+};
+
+static thread_local GpuLCSContext tl_ctx;
+
+void GpuLCS::computeLCSLengths(
+        CSequence*  ref,
+        CSequence** sequences,
+        int         n_seqs,
+        uint32_t*   out_vector,
+        CLCSBP&     lcsbp)
+{
+    GpuLCSContext& ctx = tl_ctx;
+
+    auto pref  = ref;
+    int bv_len = (pref->data_size + 63) / 64;
+
+    if (!ctx.initialized) {
+        if (!ctx.init()) return;
+    }
+
+    if (!ctx.ensureRefBitmasks(pref->p_bit_masks, pref->p_bit_masks, bv_len)) return;
+
+    size_t max_batch_symbols = 0;
+    for (int start = 0; start < n_seqs; start += ctx.BATCH_SIZE) {
         size_t cur = 0;
-        int end = min(start + BATCH_SIZE, n_seqs);
+        int end = std::min(start + ctx.BATCH_SIZE, n_seqs);
         for (int i = start; i < end; ++i)
             cur += sequences[i]->length;
-        max_batch_len = max(max_batch_len, (int)cur);
+        max_batch_symbols = std::max(max_batch_symbols, cur);
     }
+    if (!ctx.ensureConcatPool(max_batch_symbols)) return;
 
-    size_t stream_concat_len = max_batch_len;
-    size_t stream_offset_len = BATCH_SIZE;
-    size_t stream_output_len = BATCH_SIZE * sizeof(uint32_t);
+    const size_t stream_concat_len = max_batch_symbols;
+    const size_t stream_offset_len = ctx.BATCH_SIZE;
 
-    // Reallocate concat pool only if this call needs more space
-    if (stream_concat_len > alloc_concat_len) {
-        if (d_concat_pool)        { cudaFree(d_concat_pool);             d_concat_pool        = nullptr; }
-        if (h_concat_pool_pinned) { cudaFreeHost(h_concat_pool_pinned);  h_concat_pool_pinned = nullptr; }
-        cudaError_t err;
-        err = cudaMalloc    (&d_concat_pool,        stream_concat_len * sizeof(symbol_t) * nStreams);
-        err = cudaMallocHost(&h_concat_pool_pinned, stream_concat_len * sizeof(symbol_t) * nStreams);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
-            return;
+    bool stream_busy[ctx.N_STREAMS]        = {};
+    int  stream_batch_start[ctx.N_STREAMS] = {};
+    int  stream_batch_n[ctx.N_STREAMS]     = {};
+
+    for (int start = 0; start < n_seqs; start += ctx.BATCH_SIZE) {
+
+        int batch_n   = std::min(ctx.BATCH_SIZE, n_seqs - start);
+        int si        = (start / ctx.BATCH_SIZE) % ctx.N_STREAMS;
+        cudaStream_t currStream = ctx.streams[si];
+
+        symbol_t* d_concat_seqs    = ctx.d_concat_pool        + si * stream_concat_len;
+        symbol_t* h_concat_pinned  = ctx.h_concat_pool_pinned + si * stream_concat_len;
+        uint32_t* d_out_lcs        = ctx.d_out_pool           + si * stream_offset_len;
+        uint32_t* h_out_lcs_pinned = ctx.h_out_pool_pinned    + si * stream_offset_len;
+        int*      d_offsets        = ctx.d_offset_pool        + si * stream_offset_len;
+        int*      h_offsets_pinned = ctx.h_offset_pool_pinned + si * stream_offset_len;
+        int*      d_lengths        = ctx.d_length_pool        + si * stream_offset_len;
+        int*      h_lengths_pinned = ctx.h_length_pool_pinned + si * stream_offset_len;
+
+        if (stream_busy[si]) {
+            cudaEventSynchronize(ctx.events[si]);
+            int ps = stream_batch_start[si];
+            int pn = stream_batch_n[si];
+            for (int i = 0; i < pn; ++i)
+                out_vector[ps + i] = h_out_lcs_pinned[i];
+            stream_busy[si] = false;
         }
-        alloc_concat_len = stream_concat_len;
-    }
 
-    // Upload ref bitmasks directly — no intermediate vector
-    uint64_t* d_ref_bitmasks;
-    cudaError_t err = cudaMalloc(&d_ref_bitmasks, (size_t)NO_SYMBOLS * bv_len * sizeof(uint64_t));
-    err = cudaMemcpy(d_ref_bitmasks, pref->p_bit_masks,
-                     (size_t)NO_SYMBOLS * bv_len * sizeof(uint64_t),
-                     cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {
-        fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
-        return;
-    }
-
-    std::vector<bool> stream_busy(nStreams, false);
-    std::vector<int>  stream_batch_start(nStreams, 0);
-    std::vector<int>  stream_batch_n(nStreams, 0);
-
-    for (int start = 0; start < n_seqs; start += BATCH_SIZE) {
-
-        int batch_n    = std::min(BATCH_SIZE, n_seqs - start);
-        int batch_idx  = start / BATCH_SIZE;
-        int stream_idx = batch_idx % nStreams;
-        cudaStream_t currStream = streams[stream_idx];
-
-        symbol_t* d_concat_seqs    = d_concat_pool        + stream_idx * stream_concat_len;
-        symbol_t* h_concat_pinned  = h_concat_pool_pinned + stream_idx * stream_concat_len;
-        uint32_t* d_out_lcs        = d_out_pool           + stream_idx * stream_output_len / sizeof(uint32_t);
-        uint32_t* h_out_lcs_pinned = h_out_pool_pinned    + stream_idx * stream_output_len / sizeof(uint32_t);
-        int*      d_offsets        = d_offset_pool        + stream_idx * stream_offset_len;
-        int*      h_offsets_pinned = h_offset_pool_pinned + stream_idx * stream_offset_len;
-        int*      d_lengths        = d_length_pool        + stream_idx * stream_offset_len;
-        int*      h_lengths_pinned = h_length_pool_pinned + stream_idx * stream_offset_len;
-
-        std::vector<symbol_t> h_concat_seqs;
-        std::vector<int> h_offsets(batch_n);
-        std::vector<int> h_lengths(batch_n);
-        int running_offset = 0;
+        symbol_t* write_ptr = h_concat_pinned;
         for (int i = 0; i < batch_n; ++i) {
             auto pseq = sequences[start + i];
-            int len = pseq->length;
-            h_lengths[i] = len;
-            h_offsets[i] = running_offset;
-            h_concat_seqs.insert(h_concat_seqs.end(), pseq->data, pseq->data + len);
-            running_offset += len;
+            h_lengths_pinned[i] = pseq->length;
+            h_offsets_pinned[i] = (int)(write_ptr - h_concat_pinned);
+            memcpy(write_ptr, pseq->data, pseq->length * sizeof(symbol_t));
+            write_ptr += pseq->length;
         }
+        size_t total_symbols = (size_t)(write_ptr - h_concat_pinned);
 
-        if (stream_busy[stream_idx]) {
-            cudaEventSynchronize(events[stream_idx]);
-            int prev_start = stream_batch_start[stream_idx];
-            int prev_n     = stream_batch_n[stream_idx];
-            for (int i = 0; i < prev_n; ++i)
-                out_vector[prev_start + i] = h_out_lcs_pinned[i];
-            stream_busy[stream_idx] = false;
-        }
-
-        memcpy(h_concat_pinned,  h_concat_seqs.data(), h_concat_seqs.size() * sizeof(symbol_t));
-        memcpy(h_offsets_pinned, h_offsets.data(),     batch_n * sizeof(int));
-        memcpy(h_lengths_pinned, h_lengths.data(),     batch_n * sizeof(int));
-
-        err = cudaMemcpyAsync(d_concat_seqs, h_concat_pinned,  h_concat_seqs.size() * sizeof(symbol_t), cudaMemcpyHostToDevice, currStream);
-        err = cudaMemcpyAsync(d_offsets,     h_offsets_pinned, batch_n * sizeof(int),                   cudaMemcpyHostToDevice, currStream);
-        err = cudaMemcpyAsync(d_lengths,     h_lengths_pinned, batch_n * sizeof(int),                   cudaMemcpyHostToDevice, currStream);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
-            return;
-        }
+        cudaError_t err;
+        err = cudaMemcpyAsync(d_concat_seqs,  h_concat_pinned,  total_symbols * sizeof(symbol_t), cudaMemcpyHostToDevice, currStream);
+        if (err != cudaSuccess) { fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)); return; }
+        err = cudaMemcpyAsync(d_offsets,      h_offsets_pinned, batch_n * sizeof(int),            cudaMemcpyHostToDevice, currStream);
+        if (err != cudaSuccess) { fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)); return; }
+        err = cudaMemcpyAsync(d_lengths,      h_lengths_pinned, batch_n * sizeof(int),            cudaMemcpyHostToDevice, currStream);
+        if (err != cudaSuccess) { fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)); return; }
 
         if (bv_len <= 4) {
-            //printf("Using ThreadPerSeq kernel\n");
             LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
-                d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
-
-            // printf("bv_len = %d", bv_len);
-
-            // size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
-            // LCS_Kernel_WarpPerSeq<<<512, 256, smem, currStream>>>(
-            //     d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
-
+                d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
+                d_out_lcs, bv_len, batch_n);
         } else if (bv_len <= 32) {
-            //printf("Using WarpPerSeq kernel\n");
-
             size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
             LCS_Kernel_WarpPerSeq<<<512, 256, smem, currStream>>>(
-                d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
-            
-            // printf("bv_len = %d", bv_len);
-
-
-            // LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
-            //     d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
-
+                d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
+                d_out_lcs, bv_len, batch_n);
         } else {
-            //printf("Using BlockSerial kernel\n");
             size_t smem = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
             LCS_Kernel_BlockSerial<<<1024, 32, smem, currStream>>>(
-                d_concat_seqs, d_ref_bitmasks, d_offsets, d_lengths, d_out_lcs, bv_len, batch_n);
+                d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
+                d_out_lcs, bv_len, batch_n);
         }
 
         err = cudaGetLastError();
@@ -548,29 +566,24 @@ void GpuLCS::computeLCSLengths(
         }
 
         err = cudaMemcpyAsync(h_out_lcs_pinned, d_out_lcs, batch_n * sizeof(uint32_t), cudaMemcpyDeviceToHost, currStream);
-        if (err != cudaSuccess) {
-            fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err));
-            return;
-        }
+        if (err != cudaSuccess) { fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)); return; }
 
-        cudaEventRecord(events[stream_idx], currStream);
-        stream_busy[stream_idx]        = true;
-        stream_batch_start[stream_idx] = start;
-        stream_batch_n[stream_idx]     = batch_n;
+        cudaEventRecord(ctx.events[si], currStream);
+        stream_busy[si]        = true;
+        stream_batch_start[si] = start;
+        stream_batch_n[si]     = batch_n;
     }
 
-    for (int i = 0; i < nStreams; ++i) {
+    for (int i = 0; i < ctx.N_STREAMS; ++i) {
         if (stream_busy[i]) {
-            cudaEventSynchronize(events[i]);
-            int prev_start = stream_batch_start[i];
-            int prev_n     = stream_batch_n[i];
-            uint32_t* h_out = h_out_pool_pinned + i * stream_output_len / sizeof(uint32_t);
-            for (int j = 0; j < prev_n; ++j)
-                out_vector[prev_start + j] = h_out[j];
+            cudaEventSynchronize(ctx.events[i]);
+            int ps = stream_batch_start[i];
+            int pn = stream_batch_n[i];
+            uint32_t* h_out = ctx.h_out_pool_pinned + i * stream_offset_len;
+            for (int j = 0; j < pn; ++j)
+                out_vector[ps + j] = h_out[j];
         }
     }
-
-    cudaFree(d_ref_bitmasks);
 }
 
 // void GpuLCS::computeLCSLengths(
