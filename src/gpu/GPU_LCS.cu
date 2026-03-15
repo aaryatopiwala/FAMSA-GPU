@@ -156,10 +156,10 @@ __global__ void LCS_Kernel_ThreadPerSeq(
         const symbol_t* seq = d_concat_seqs + d_offsets[b];
         int seq_len = d_lengths[b];
 
-        // Small fixed local workspace
+        // bit vector
         uint64_t V_local[4];
 
-        // Initialize workspace to all 1s
+
         for (int w = 0; w < bv_len; ++w) {
             V_local[w] = ~0ull;
         }
@@ -252,15 +252,13 @@ __global__ void LCS_Kernel_WarpPerSeq(
                 g = (sum1 < V) ? 1u : 0u;
                 p = (sum1 == 0xffffffffffffffffull) ? 1u : 0u;
             }
-            // Build bitmasks
+
             unsigned gmask = __ballot_sync(FULL_MASK, g);
             unsigned pmask = __ballot_sync(FULL_MASK, p);
 
-            // Ignore inactive lanes
             gmask &= ACTIVE_MASK;
             pmask &= ACTIVE_MASK;
 
-            // Parallel prefix in 32-bit scalar
             unsigned G = gmask;
             unsigned P = pmask;
 
@@ -289,7 +287,7 @@ __global__ void LCS_Kernel_WarpPerSeq(
         }
         uint32_t local_pop = (lane < bv_len) ? __popcll(~V) : 0u;
 
-        // Warp reduction
+
         local_pop += __shfl_down_sync(FULL_MASK, local_pop, 16);
         local_pop += __shfl_down_sync(FULL_MASK, local_pop, 8);
         local_pop += __shfl_down_sync(FULL_MASK, local_pop, 4);
@@ -320,29 +318,26 @@ __global__ void LCS_Kernel_BlockSerial(
     uint64_t* s_ref_bitmasks = shared_mem;
     uint64_t* s_workspace = shared_mem + NO_SYMBOLS * bv_len;
 
-    // Load reference bitmask
     for (int i = tx; i < NO_SYMBOLS * bv_len; i += bs) {
         s_ref_bitmasks[i] = d_ref_bitmasks[i];
     }
     __syncthreads();
 
-    // Grid stride
     for (int b = bx; b < batch_n; b += gs) {
         const symbol_t* seq = d_concat_seqs + d_offsets[b];
         int seq_len = d_lengths[b];
 
-        // Initialize workspace
         for (int w = tx; w < bv_len; w += bs) {
             s_workspace[w] = ~((uint64_t)0);
         }
         __syncthreads();
 
-        // process sequence positions serially using rolling scalar carry
+        // process sequence positions
         if (tx == 0) {
             for (int j = 0; j < seq_len; ++j) {
                 unsigned char c = seq[j];
 
-                // Skip invalid
+                // invalid
                 if (c == 22 || c >= 32) {
                     continue;
                 }
@@ -544,12 +539,12 @@ void GpuLCS::computeLCSLengths(
         if (err != cudaSuccess) { fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)); return; }
 
         if (bv_len <= 4) {
-            LCS_Kernel_ThreadPerSeq<<<64, 256, 0, currStream>>>(
+            LCS_Kernel_ThreadPerSeq<<<64, 128, 0, currStream>>>(
                 d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
                 d_out_lcs, bv_len, batch_n);
         } else if (bv_len <= 32) {
             size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
-            LCS_Kernel_WarpPerSeq<<<512, 256, smem, currStream>>>(
+            LCS_Kernel_WarpPerSeq<<<128, 128, smem, currStream>>>(
                 d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
                 d_out_lcs, bv_len, batch_n);
         } else {
