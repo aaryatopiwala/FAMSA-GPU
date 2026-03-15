@@ -20,4 +20,5 @@ Use `diff pid.csv pid_cuda.csv` to confirm correctness
 Change flag `-t` from 1 to other numbers to test multithreading.
 
 Locate the file in `src/gpu/GPU_LCS.CU`. Look for lines 541-555 to change kernel launch config for numblock and blocksize.
-Locate the same file in line 371 to change the configuration of N_STEAM and BATCH_SIZE.
+
+Locate the same file in line 371 to change the configuration of `N_STEAM` and `BATCH_SIZE`.
