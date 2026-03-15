@@ -98,7 +98,8 @@ CUDA_INC := -I$(CUDA_HOME)/include
 CUDA_LIBS := -L$(CUDA_HOME)/lib64 -lcudart
 
 # cpp 12, sm80 is a30
-CUFLAGS := -std=c++20 -O3 -Xcompiler -fPIC -arch=sm_80 -rdc=true --use_fast_math
+CUFLAGS := -std=c++20 -O3 -Xcompiler -fPIC -arch=sm_80 -rdc=true --use_fast_math --default-stream per-thread
+#CUFLAGS := -std=c++20 -O3 -Xcompiler -fPIC -arch=sm_80 -rdc=true --use_fast_math
 
 GPU_SRCS := $(SRC_DIR)/gpu/GPU_LCS.cu
 GPU_OBJS := $(patsubst $(SRC_DIR)/%.cu,$(OBJ_DIR)/%.cu.o,$(GPU_SRCS))
