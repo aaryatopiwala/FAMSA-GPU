@@ -1,6 +1,6 @@
-## GPU-Accelerated LCS Kernel for Sequence Alignment for FAMSA2
+# GPU-Accelerated LCS Kernel for Sequence Alignment for FAMSA2
 
-# Usage:
+## Usage:
 clone the repository with test folder intact.
 
 You can run run-command.sh to check the LCS DP matrix operation in FAMSA2.
