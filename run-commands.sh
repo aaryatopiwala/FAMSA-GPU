@@ -22,6 +22,6 @@ time ./bin/famsa -t 1 -cuda -dist_export -pid -square_matrix ./test/helicase_C/h
 # time ./bin/famsa -t 1 -dist_export -pid -square_matrix ./test/ABC_tran/ABC_tran_n pid.csv
 # time ./bin/famsa -t 1 -cuda -dist_export -pid -square_matrix ./test/ABC_tran/ABC_tran_n pid_cuda.csv
 
-# time ./bin/famsa -t 8 -dist_export -pid -square_matrix ./test/transketolase_PC/transketolase_PC_n_80k pid.csv
-# time ./bin/famsa -t 8 -cuda -dist_export -pid -square_matrix ./test/transketolase_PC/transketolase_PC_n_80k pid_cuda.csv
+# time ./bin/famsa -t 1 -dist_export -pid -square_matrix ./test/transketolase_PC/transketolase_PC_n_80k pid.csv
+# time ./bin/famsa -t 1 -cuda -dist_export -pid -square_matrix ./test/transketolase_PC/transketolase_PC_n_80k pid_cuda.csv
 

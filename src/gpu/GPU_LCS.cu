@@ -368,6 +368,7 @@ __global__ void LCS_Kernel_BlockSerial(
 }
 
 struct GpuLCSContext {
+    // Change N_STREAMS and Batch size here
     static constexpr int BATCH_SIZE = 4000;
     static constexpr int N_STREAMS  = 2;
 
@@ -539,15 +540,18 @@ void GpuLCS::computeLCSLengths(
         if (err != cudaSuccess) { fprintf(stderr, "GPU_ERROR: %s (%s)\n", cudaGetErrorString(err), cudaGetErrorName(err)); return; }
 
         if (bv_len <= 4) {
+            // Thread kernel here
             LCS_Kernel_ThreadPerSeq<<<64, 128, 0, currStream>>>(
                 d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
                 d_out_lcs, bv_len, batch_n);
         } else if (bv_len <= 32) {
+            // Warp kernel here
             size_t smem = NO_SYMBOLS * bv_len * sizeof(uint64_t);
             LCS_Kernel_WarpPerSeq<<<128, 128, smem, currStream>>>(
                 d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
                 d_out_lcs, bv_len, batch_n);
         } else {
+            // Block kernel here 
             size_t smem = (NO_SYMBOLS * bv_len + bv_len) * sizeof(uint64_t);
             LCS_Kernel_BlockSerial<<<1024, 32, smem, currStream>>>(
                 d_concat_seqs, ctx.d_ref_bitmasks, d_offsets, d_lengths,
