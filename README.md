@@ -1,5 +1,9 @@
 # GPU-Accelerated LCS Kernel for Sequence Alignment for FAMSA2
 
+## Content
+
+The majority of this repository is cloned from FAMSA2. Most of our work sits inside folder `src/gpu/`. The CUDA and the CUDA header files are where our work is actually sitting.
+
 ## Usage:
 Clone the entire repository with the test folder intact.
 
@@ -14,3 +18,7 @@ In `run-command.sh`, uncomment the command for the tests you want to run for the
 Use `diff pid.csv pid_cuda.csv` to confirm correctness
 
 Change flag `-t` from 1 to other numbers to test multithreading.
+
+Locate the file in `src/gpu/GPU_LCS.CU`. Look for lines 541-555 to change kernel launch config for numblock and blocksize.
+
+Locate the same file in line 371 to change the configuration of `N_STEAM` and `BATCH_SIZE`.
